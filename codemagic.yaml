@@ -1,9 +1,5 @@
 # Codemagic CI for KarinsFleet (React Native iOS)
-# Docs: https://docs.codemagic.io/yaml-quick-start/building-a-react-native-app/
-#
-# Before the first successful IPA:
-# 1. In Codemagic UI → Code signing identities, upload iOS certificate + provisioning profile for com.karins
-# 2. Or connect App Store Connect integration and let Codemagic manage signing
+# Signing / App Store Connect can be added later when ready to export an IPA.
 
 workflows:
   ios-workflow:
@@ -12,13 +8,9 @@ workflows:
     instance_type: mac_mini_m2
 
     environment:
-      ios_signing:
-        distribution_type: app_store
-        bundle_identifier: com.karins
       vars:
         XCODE_WORKSPACE: "KarinsFleet.xcworkspace"
         XCODE_SCHEME: "KarinsFleet"
-        BUNDLE_ID: "com.karins"
       node: 20
       xcode: latest
       cocoapods: default
@@ -33,18 +25,18 @@ workflows:
           cd ios
           pod install
 
-      - name: Set up code signing on Xcode project
+      # Simulator build — no certificates or provisioning profiles required
+      - name: Build iOS app
         script: |
-          xcode-project use-profiles --warn-only
-
-      - name: Build IPA
-        script: |
-          xcode-project build-ipa \
-            --workspace "$CM_BUILD_DIR/ios/$XCODE_WORKSPACE" \
-            --scheme "$XCODE_SCHEME"
+          xcodebuild \
+            -workspace "$CM_BUILD_DIR/ios/$XCODE_WORKSPACE" \
+            -scheme "$XCODE_SCHEME" \
+            -sdk iphonesimulator \
+            -configuration Release \
+            -derivedDataPath "$CM_BUILD_DIR/build/ios" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
 
     artifacts:
-      - build/ios/ipa/*.ipa
+      - build/ios/Build/Products/Release-iphonesimulator/*.app
       - /tmp/xcodebuild_logs/*.log
-      - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.app
-      - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.dSYM
