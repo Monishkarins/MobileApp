@@ -308,15 +308,39 @@ function messageFromResponseData(data: unknown): string | undefined {
   return undefined;
 }
 
+function fallbackMessageForStatus(status: number, axiosMessage?: string): string {
+  // Prod /auth/signIn often returns 400 with an empty body — map to a clear UI string.
+  if (status === 400 || status === 401) {
+    return 'Invalid mobile number or password.';
+  }
+  if (status === 403) {
+    return 'Access denied for this account.';
+  }
+  if (status === 404) {
+    return 'Sign-in service not found. Please try again later.';
+  }
+  if (status >= 500) {
+    return 'Karins servers are temporarily unavailable. Please try again.';
+  }
+  // No HTTP response → DNS, TLS, offline, or blocked outbound from the host (e.g. Appetize).
+  if (status === 0) {
+    if (axiosMessage?.toLowerCase().includes('timeout')) {
+      return 'Sign-in timed out. Check your connection and try again.';
+    }
+    return 'Cannot reach Karins servers. Check your internet connection.';
+  }
+  return axiosMessage || 'Network error';
+}
+
 function normalizeError(error: unknown): ApiError {
   if (axios.isAxiosError(error)) {
     const data = error.response?.data;
+    const status = error.response?.status ?? 0;
     return {
-      status: error.response?.status ?? 0,
+      status,
       message:
         messageFromResponseData(data) ??
-        error.message ??
-        'Network error',
+        fallbackMessageForStatus(status, error.message),
       code: typeof data === 'object' && data && 'code' in data
         ? String((data as { code?: string }).code ?? '')
         : undefined,

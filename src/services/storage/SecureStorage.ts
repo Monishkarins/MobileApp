@@ -1,5 +1,4 @@
 import * as Keychain from 'react-native-keychain';
-import { Platform } from 'react-native';
 import { MMKV } from 'react-native-mmkv';
 import { clearHttpCookies } from '../auth/httpCookies';
 
@@ -36,10 +35,9 @@ export const SecureStorage = {
       token,
       {
         service: KEYCHAIN_SERVICE,
-        // WHEN_UNLOCKED is more reliable on release Android APKs than device-only scope.
-        accessible: Platform.OS === 'android'
-          ? Keychain.ACCESSIBLE.WHEN_UNLOCKED
-          : Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+        // WHEN_UNLOCKED works on real devices and cloud simulators (Appetize);
+        // THIS_DEVICE_ONLY has failed session persist on some iOS simulator hosts.
+        accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED,
       },
     );
   },

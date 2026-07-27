@@ -6,7 +6,7 @@
 
 import { createAsyncThunk, createSlice, PayloadAction } from '@reduxjs/toolkit';
 import { authApi } from '../../services/api/authApi';
-import { invalidateApiSession, markApiSessionActive } from '../../services/api/client';
+import { invalidateApiSession, markApiSessionActive, getApiErrorMessage } from '../../services/api/client';
 import { SecureStorage, Cache } from '../../services/storage/SecureStorage';
 import type { AuthUser, DashboardContext, LoginPayload, RefreshTokenResponse } from '../../types/auth';
 import { isCustomerGroupAdmin, isMobileAppLoginBlocked, requiresContextSelection } from '../../types/auth';
@@ -109,10 +109,11 @@ export const signIn = createAsyncThunk<
     void registerPushDevice();
 
     return { user: sessionUser };
-  } catch (error: any) {
+  } catch (error: unknown) {
     await SecureStorage.prepareForSignIn();
     invalidateApiSession();
-    return rejectWithValue(error?.message ?? 'Unable to sign in. Please try again.');
+    // Prefer normalized ApiError.message so Appetize/network failures are not a blank generic.
+    return rejectWithValue(getApiErrorMessage(error, 'Unable to sign in. Please try again.'));
   }
 });
 
@@ -151,10 +152,10 @@ export const signInWithPin = createAsyncThunk<
     void registerPushDevice();
 
     return { user: sessionUser };
-  } catch (error: any) {
+  } catch (error: unknown) {
     await SecureStorage.prepareForSignIn();
     invalidateApiSession();
-    return rejectWithValue(error?.message ?? 'PIN sign-in failed.');
+    return rejectWithValue(getApiErrorMessage(error, 'PIN sign-in failed.'));
   }
 });
 
