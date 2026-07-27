@@ -11,9 +11,6 @@ workflows:
       vars:
         XCODE_WORKSPACE: "KarinsFleet.xcworkspace"
         XCODE_SCHEME: "KarinsFleet"
-        # RN 0.86 prebuilt deps hide RCT-Folly; older pods like RNShare still require it
-        RCT_USE_PREBUILT_RNCORE: "0"
-        RCT_USE_RN_DEP: "0"
       node: 20
       xcode: latest
       cocoapods: default
@@ -28,15 +25,17 @@ workflows:
           cd ios
           pod install
 
-      # Simulator build — no certificates or provisioning profiles required
+      # arm64 simulator only — mac_mini_m2 is Apple Silicon (x86_64 causes RNShare/native failures)
       - name: Build iOS app
         script: |
           xcodebuild \
             -workspace "$CM_BUILD_DIR/ios/$XCODE_WORKSPACE" \
             -scheme "$XCODE_SCHEME" \
-            -sdk iphonesimulator \
             -configuration Release \
+            -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath "$CM_BUILD_DIR/build/ios" \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=NO \
             CODE_SIGNING_ALLOWED=NO \
             build
 
