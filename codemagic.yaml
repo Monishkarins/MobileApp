@@ -1,45 +1,50 @@
+# Codemagic CI for KarinsFleet (React Native iOS)
+# Docs: https://docs.codemagic.io/yaml-quick-start/building-a-react-native-app/
+#
+# Before the first successful IPA:
+# 1. In Codemagic UI → Code signing identities, upload iOS certificate + provisioning profile for com.karins
+# 2. Or connect App Store Connect integration and let Codemagic manage signing
+
 workflows:
   ios-workflow:
     name: iOS Build
+    max_build_duration: 120
+    instance_type: mac_mini_m2
 
     environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.karins
+      vars:
+        XCODE_WORKSPACE: "KarinsFleet.xcworkspace"
+        XCODE_SCHEME: "KarinsFleet"
+        BUNDLE_ID: "com.karins"
+      node: 20
       xcode: latest
       cocoapods: default
-      node: 20
 
     scripts:
-      - name: Install dependencies
+      - name: Install npm dependencies
         script: |
           npm install
 
-      - name: Install CocoaPods
+      - name: Install CocoaPods dependencies
         script: |
           cd ios
-          echo "Current directory:"
-          pwd
+          pod install
 
-          echo "Before pod install:"
-          ls -la
-
-          pod install --repo-update
-
-          echo "After pod install:"
-          ls -la
-
-          find . -name "*.xcworkspace"
-
-          cd ..
-
-      - name: Build iOS
+      - name: Set up code signing on Xcode project
         script: |
-          echo "Listing ios directory"
-          ls -la ios
+          xcode-project use-profiles --warn-only
 
-          find ios -name "*.xcworkspace"
-
+      - name: Build IPA
+        script: |
           xcode-project build-ipa \
-            --workspace ios/KarinsFleet.xcworkspace \
-            --scheme KarinsFleet
+            --workspace "$CM_BUILD_DIR/ios/$XCODE_WORKSPACE" \
+            --scheme "$XCODE_SCHEME"
 
     artifacts:
       - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+      - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.app
+      - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.dSYM
