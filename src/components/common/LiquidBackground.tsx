@@ -1,0 +1,66 @@
+import React from 'react';
+import {StyleSheet, View, type StyleProp, type ViewStyle} from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
+import {Colors} from '../../theme';
+
+interface LiquidBackgroundProps {
+  children: React.ReactNode;
+  style?: StyleProp<ViewStyle>;
+  /** Inner screens use a calmer gradient to protect data readability. */
+  variant?: 'full' | 'light';
+}
+
+export function LiquidBackground({
+  children,
+  style,
+  variant = 'full',
+}: LiquidBackgroundProps) {
+  const colors = variant === 'full'
+    ? [Colors.bg.d0, Colors.bg.d1, Colors.bg.d2, Colors.bg.d3]
+    : [Colors.bg.d2, Colors.bg.d1, Colors.bg.d0];
+
+  return (
+    <LinearGradient
+      colors={colors}
+      locations={variant === 'full' ? [0, 0.28, 0.68, 1] : [0, 0.58, 1]}
+      start={{x: 0.15, y: 0}}
+      end={{x: 0.85, y: 1}}
+      style={[styles.fill, style]}>
+      <View pointerEvents="none" style={styles.blueGlow} />
+      <View pointerEvents="none" style={styles.cyanGlow} />
+      <View pointerEvents="none" style={styles.bottomGlow} />
+      {children}
+    </LinearGradient>
+  );
+}
+
+const styles = StyleSheet.create({
+  fill: {flex: 1},
+  blueGlow: {
+    position: 'absolute',
+    top: -150,
+    right: -130,
+    width: 390,
+    height: 390,
+    borderRadius: 195,
+    backgroundColor: 'rgba(0,113,197,0.16)',
+  },
+  cyanGlow: {
+    position: 'absolute',
+    top: 210,
+    left: -190,
+    width: 360,
+    height: 360,
+    borderRadius: 180,
+    backgroundColor: 'rgba(99,230,255,0.035)',
+  },
+  bottomGlow: {
+    position: 'absolute',
+    bottom: -180,
+    right: -130,
+    width: 400,
+    height: 400,
+    borderRadius: 200,
+    backgroundColor: 'rgba(47,128,255,0.07)',
+  },
+});

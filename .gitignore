@@ -1,0 +1,70 @@
+# Dependencies
+node_modules/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.mobileprovision
+android/keystore.properties
+*.keystore
+!android/app/debug.keystore
+
+# Logs / OS
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store
+Thumbs.db
+
+# Tests / coverage
+coverage/
+*.lcov
+.jest/
+
+# Metro / bundler
+.metro-health-check*
+*.jsbundle
+
+# TypeScript
+*.tsbuildinfo
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Expo / EAS
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/app/release/
+android/local.properties
+android/.cxx/
+android/captures/
+android/app/.cxx/
+
+# iOS
+ios/Pods/
+ios/build/
+ios/DerivedData/
+ios/*.xcworkspace
+!ios/*.xcworkspace/contents.xcworkspacedata
+ios/**/*.xcuserstate
+ios/**/xcuserdata/
+ios/.xcode.env.local
+*.xcarchive
+
+# Temporary template / local artifacts
+dependencies.txt

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="white">#FFFFFFFF</color>
+    <color name="notification_accent">#16B7F3</color>
+    <!-- Auth / app navy — also used as Activity windowBackground for edge-to-edge. -->
+    <color name="app_window_background">#000B1F</color>
+</resources>

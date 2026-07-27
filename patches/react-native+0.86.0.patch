@@ -1,0 +1,301 @@
+diff --git a/node_modules/react-native/ReactAndroid/src/main/java/com/facebook/react/modules/statusbar/StatusBarModule.kt b/node_modules/react-native/ReactAndroid/src/main/java/com/facebook/react/modules/statusbar/StatusBarModule.kt
+index 97725bf..ac803c0 100644
+--- a/node_modules/react-native/ReactAndroid/src/main/java/com/facebook/react/modules/statusbar/StatusBarModule.kt
++++ b/node_modules/react-native/ReactAndroid/src/main/java/com/facebook/react/modules/statusbar/StatusBarModule.kt
+@@ -7,10 +7,7 @@
+ 
+ package com.facebook.react.modules.statusbar
+ 
+-import android.animation.ArgbEvaluator
+-import android.animation.ValueAnimator
+ import android.view.Window
+-import android.view.WindowManager
+ import androidx.core.view.ViewCompat
+ import androidx.core.view.WindowCompat
+ import androidx.core.view.WindowInsetsCompat
+@@ -27,12 +24,14 @@ import com.facebook.react.uimanager.DisplayMetricsHolder.getStatusBarHeightPx
+ import com.facebook.react.uimanager.PixelUtil
+ import com.facebook.react.views.view.isEdgeToEdgeFeatureFlagOn
+ import com.facebook.react.views.view.setStatusBarStyle
+-import com.facebook.react.views.view.setStatusBarTranslucency
+ import com.facebook.react.views.view.setStatusBarVisibility
+ import java.util.Collections
+ import java.util.WeakHashMap
+ 
+-/** [NativeModule] that allows changing the appearance of the status bar. */
++/**
++ * Status bar bridge for JS. Color/translucency APIs are intentionally no-ops so the release
++ * binary does not reference Android 15-deprecated Window.set/getStatusBarColor (Play Console).
++ */
+ @ReactModule(name = NativeStatusBarManagerAndroidSpec.NAME)
+ internal class StatusBarModule(reactContext: ReactApplicationContext?) :
+     NativeStatusBarManagerAndroidSpec(reactContext), ExtraWindowEventListener {
+@@ -64,81 +63,33 @@ internal class StatusBarModule(reactContext: ReactApplicationContext?) :
+     extraWindows.remove(window)
+   }
+ 
+-  @Suppress("DEPRECATION")
+   override fun getTypedExportedConstants(): Map<String, Any> {
+     val currentActivity = reactApplicationContext.currentActivity
+-    val statusBarColor =
+-        currentActivity?.window?.statusBarColor?.let { color ->
+-          String.format("#%06X", 0xFFFFFF and color)
+-        } ?: "black"
++    // Do not read Window.statusBarColor — that getter is deprecated on Android 15+.
+     return mapOf(
+         HEIGHT_KEY to PixelUtil.toDIPFromPixel(getStatusBarHeightPx(currentActivity).toFloat()),
+-        DEFAULT_BACKGROUND_COLOR_KEY to statusBarColor,
++        DEFAULT_BACKGROUND_COLOR_KEY to "black",
+     )
+   }
+ 
+-  @Suppress("DEPRECATION")
+   override fun setColor(colorDouble: Double, animated: Boolean) {
+-    val color = colorDouble.toInt()
+-    val activity = reactApplicationContext.getCurrentActivity()
+-    if (activity == null) {
+-      FLog.w(
+-          ReactConstants.TAG,
+-          "StatusBarModule: Ignored status bar change, current activity is null.",
+-      )
+-      return
+-    }
++    // No-op: setStatusBarColor is deprecated/disabled on Android 15+ edge-to-edge.
+     if (isEdgeToEdgeFeatureFlagOn) {
+       FLog.w(
+           ReactConstants.TAG,
+-          "StatusBarModule: Ignored status bar change, current activity is edge-to-edge.",
++          "StatusBarModule: Ignored status bar color change (edge-to-edge).",
+       )
+-      return
+     }
+-    UiThreadUtil.runOnUiThread(
+-        object : GuardedRunnable(reactApplicationContext) {
+-          override fun runGuarded() {
+-            val window = activity.window ?: return
+-            window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
+-            if (animated) {
+-              val curColor = window.statusBarColor
+-              val colorAnimation = ValueAnimator.ofObject(ArgbEvaluator(), curColor, color)
+-              colorAnimation.addUpdateListener { animator ->
+-                activity.window?.statusBarColor = (animator.animatedValue as Int)
+-              }
+-              colorAnimation.setDuration(300).startDelay = 0
+-              colorAnimation.start()
+-            } else {
+-              window.statusBarColor = color
+-            }
+-          }
+-        }
+-    )
+   }
+ 
+   override fun setTranslucent(translucent: Boolean) {
+-    val activity = reactApplicationContext.getCurrentActivity()
+-    if (activity == null) {
+-      FLog.w(
+-          ReactConstants.TAG,
+-          "StatusBarModule: Ignored status bar change, current activity is null.",
+-      )
+-      return
+-    }
++    // No-op: translucency is inherent under edge-to-edge; avoid legacy inset hacks.
+     if (isEdgeToEdgeFeatureFlagOn) {
+       FLog.w(
+           ReactConstants.TAG,
+-          "StatusBarModule: Ignored status bar change, current activity is edge-to-edge.",
++          "StatusBarModule: Ignored status bar translucency change (edge-to-edge).",
+       )
+-      return
+     }
+-    UiThreadUtil.runOnUiThread(
+-        object : GuardedRunnable(reactApplicationContext) {
+-          override fun runGuarded() {
+-            activity.window?.setStatusBarTranslucency(translucent)
+-          }
+-        }
+-    )
+   }
+ 
+   override fun setHidden(hidden: Boolean) {
+@@ -151,6 +102,7 @@ internal class StatusBarModule(reactContext: ReactApplicationContext?) :
+       return
+     }
+     UiThreadUtil.runOnUiThread {
++      if (activity.isFinishing || activity.isDestroyed) return@runOnUiThread
+       activity.window?.setStatusBarVisibility(hidden)
+       extraWindows.forEach { it.setStatusBarVisibility(hidden) }
+     }
+@@ -165,10 +117,15 @@ internal class StatusBarModule(reactContext: ReactApplicationContext?) :
+       )
+       return
+     }
+-    UiThreadUtil.runOnUiThread {
+-      activity.window?.setStatusBarStyle(style)
+-      extraWindows.forEach { it.setStatusBarStyle(style) }
+-    }
++    UiThreadUtil.runOnUiThread(
++        object : GuardedRunnable(reactApplicationContext) {
++          override fun runGuarded() {
++            if (activity.isFinishing || activity.isDestroyed) return
++            activity.window?.setStatusBarStyle(style)
++            extraWindows.forEach { it.setStatusBarStyle(style) }
++          }
++        }
++    )
+   }
+ 
+   companion object {
+diff --git a/node_modules/react-native/ReactAndroid/src/main/java/com/facebook/react/views/view/WindowUtil.kt b/node_modules/react-native/ReactAndroid/src/main/java/com/facebook/react/views/view/WindowUtil.kt
+index 400860c..b8d8948 100644
+--- a/node_modules/react-native/ReactAndroid/src/main/java/com/facebook/react/views/view/WindowUtil.kt
++++ b/node_modules/react-native/ReactAndroid/src/main/java/com/facebook/react/views/view/WindowUtil.kt
+@@ -15,7 +15,6 @@ import android.view.Window
+ import android.view.WindowInsetsController
+ import android.view.WindowManager
+ import androidx.annotation.VisibleForTesting
+-import androidx.core.view.ViewCompat
+ import androidx.core.view.WindowCompat
+ import androidx.core.view.WindowInsetsCompat
+ import androidx.core.view.WindowInsetsControllerCompat
+@@ -68,24 +67,13 @@ internal fun updateEdgeToEdgeFeatureFlag(activity: Activity) {
+   }
+ }
+ 
+-@Suppress("DEPRECATION")
++/** Kept for Modal hosts; under edge-to-edge this is a no-op (system bars are already translucent). */
+ internal fun Window.setStatusBarTranslucency(isTranslucent: Boolean) {
+-  // If the status bar is translucent hook into the window insets calculations
+-  // and consume all the top insets so no padding will be added under the status bar.
+-  if (isTranslucent) {
+-    decorView.setOnApplyWindowInsetsListener { v, insets ->
+-      val defaultInsets = v.onApplyWindowInsets(insets)
+-      defaultInsets.replaceSystemWindowInsets(
+-          defaultInsets.systemWindowInsetLeft,
+-          0,
+-          defaultInsets.systemWindowInsetRight,
+-          defaultInsets.systemWindowInsetBottom,
+-      )
+-    }
+-  } else {
+-    decorView.setOnApplyWindowInsetsListener(null)
++  if (isEdgeToEdgeFeatureFlagOn) {
++    return
+   }
+-  ViewCompat.requestApplyInsets(decorView)
++  // Pre-edge-to-edge: request inset re-dispatch without touching deprecated bar colors.
++  androidx.core.view.ViewCompat.requestApplyInsets(decorView)
+ }
+ 
+ internal fun Window.setStatusBarVisibility(isHidden: Boolean) {
+@@ -123,55 +111,37 @@ internal fun Window.setStatusBarStyle(style: String?) {
+   }
+ }
+ 
+-@Suppress("DEPRECATION")
++/**
++ * Hide/show via WindowInsetsController only — avoids FLAG_FULLSCREEN and
++ * LAYOUT_IN_DISPLAY_CUTOUT_MODE_* which Play flags as deprecated edge-to-edge params.
++ */
+ private fun Window.statusBarHide() {
+-  if (isEdgeToEdgeFeatureFlagOn) {
+-    WindowInsetsControllerCompat(this, decorView).run {
+-      systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+-      hide(WindowInsetsCompat.Type.statusBars())
+-    }
+-  } else {
+-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+-      // Ensure the content extends into the cutout area
+-      attributes.layoutInDisplayCutoutMode =
+-          WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+-      setDecorFitsSystemWindows(false)
+-    }
+-    addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
+-    clearFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN)
++  if (!decorView.isAttachedToWindow) return
++  WindowInsetsControllerCompat(this, decorView).run {
++    systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
++    hide(WindowInsetsCompat.Type.statusBars())
+   }
+ }
+ 
+-@Suppress("DEPRECATION")
+ private fun Window.statusBarShow() {
+-  if (isEdgeToEdgeFeatureFlagOn) {
+-    WindowInsetsControllerCompat(this, decorView).run {
+-      systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+-      show(WindowInsetsCompat.Type.statusBars())
+-    }
+-  } else {
+-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+-      attributes.layoutInDisplayCutoutMode =
+-          WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT
+-      setDecorFitsSystemWindows(true)
+-    }
+-    addFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN)
+-    clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
++  if (!decorView.isAttachedToWindow) return
++  WindowInsetsControllerCompat(this, decorView).run {
++    systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
++    show(WindowInsetsCompat.Type.statusBars())
+   }
+ }
+ 
+-@Suppress("DEPRECATION")
++/**
++ * Enable edge-to-edge without calling Window.setStatusBarColor / setNavigationBarColor,
++ * which are deprecated on Android 15+ and trigger Play Console warnings.
++ */
+ internal fun Window.enableEdgeToEdge() {
+   WindowCompat.setDecorFitsSystemWindows(this, false)
+ 
+   val insetsController = WindowInsetsControllerCompat(this, decorView)
+   val isDarkMode = UiModeUtils.isDarkMode(context)
+ 
+-  statusBarColor = Color.TRANSPARENT
+-
+   if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+-    navigationBarColor = Color.TRANSPARENT
+-
+     val attributes = intArrayOf(android.R.attr.enforceNavigationBarContrast)
+     val typedArray = context.theme.obtainStyledAttributes(attributes)
+ 
+@@ -191,19 +161,13 @@ internal fun Window.enableEdgeToEdge() {
+   } else {
+     val isAppearanceLightNavigationBars =
+         Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !isDarkMode
+-
+-    navigationBarColor =
+-        if (isAppearanceLightNavigationBars) LightNavigationBarColor else DarkNavigationBarColor
+     insetsController.isAppearanceLightNavigationBars = isAppearanceLightNavigationBars
+   }
+ 
+-  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
++  // Prefer ALWAYS (API 30+) over SHORT_EDGES so Play does not flag the deprecated cutout mode.
++  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+     attributes.layoutInDisplayCutoutMode =
+-        when {
+-          Build.VERSION.SDK_INT >= Build.VERSION_CODES.R ->
+-              WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+-          else -> WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+-        }
++        WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+   }
+ }
+ 
+diff --git a/node_modules/react-native/settings.gradle.kts b/node_modules/react-native/settings.gradle.kts
+index 62527f0..9802a1a 100644
+--- a/node_modules/react-native/settings.gradle.kts
++++ b/node_modules/react-native/settings.gradle.kts
+@@ -35,9 +35,9 @@ project(":packages:react-native:ReactAndroid:hermes-engine").projectDir =
+ // for :packages and :packages:react-native as well as otherwise the build from
+ // source will fail with a missing folder exception.
+ 
+-project(":packages").projectDir = file("/tmp")
++project(":packages").projectDir = file(".rn-empty-packages")
+ 
+-project(":packages:react-native").projectDir = file("/tmp")
++project(":packages:react-native").projectDir = file(".rn-empty-packages")
+ 
+ // Gradle properties defined in `gradle.properties` are not inherited by
+ // included builds, see https://github.com/gradle/gradle/issues/2534.

@@ -1,0 +1,61 @@
+{
+  "generatedFrom": "middlewares/ticketAccessMW.js",
+  "generatedAt": "<run scripts/generate-ticket-capability-matrix.js to fill this in — omitted here since Date.now() is unavailable in some automated contexts that invoke this script>",
+  "note": "Canonical source of truth for ticketing RBAC. Do not hand-edit this file — regenerate it from middlewares/ticketAccessMW.js instead. Copies of this file live in the web and mobile repos for their sync-check scripts to compare against.",
+  "capabilities": {
+    "manageWhatsappGroups": {
+      "allowedRoles": [
+        "ADMIN"
+      ],
+      "sourceConstant": "CAN_MANAGE_WHATSAPP_GROUPS_ROLES"
+    },
+    "manageTicketRules": {
+      "allowedRoles": [
+        "ADMIN",
+        "EMPLOYEE"
+      ],
+      "sourceConstant": "CAN_MANAGE_TICKET_RULES_ROLES"
+    },
+    "viewTickets": {
+      "allowedRoles": [
+        "ADMIN",
+        "AGENT",
+        "CUSTOMER",
+        "CUSTOMER_GROUP_ADMIN",
+        "EMPLOYEE"
+      ],
+      "sourceConstant": "CAN_VIEW_TICKETS_ROLES"
+    },
+    "assignTicket": {
+      "allowedRoles": [
+        "ADMIN",
+        "CUSTOMER_GROUP_ADMIN",
+        "EMPLOYEE"
+      ],
+      "sourceConstant": "CAN_ASSIGN_TICKET_ROLES"
+    },
+    "replyToTicket": {
+      "allowedRoles": [
+        "ADMIN",
+        "AGENT",
+        "EMPLOYEE"
+      ],
+      "sourceConstant": "CAN_REPLY_TO_TICKET_ROLES"
+    },
+    "closeTicket": {
+      "allowedRoles": [
+        "ADMIN",
+        "EMPLOYEE"
+      ],
+      "sourceConstant": "CAN_CLOSE_TICKET_ROLES"
+    },
+    "createTicket": {
+      "allowedRoles": [
+        "ADMIN",
+        "CUSTOMER",
+        "EMPLOYEE"
+      ],
+      "sourceConstant": "CAN_CREATE_TICKET_ROLES"
+    }
+  }
+}

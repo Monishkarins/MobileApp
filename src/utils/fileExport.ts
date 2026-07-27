@@ -1,0 +1,210 @@
+/**
+ * Saves binary API export responses directly to the device Downloads folder.
+ * No share sheet — Android uses MediaStore Downloads; iOS uses Documents.
+ *
+ * RN axios may return ArrayBuffer, Uint8Array, number[], or a string
+ * (binary or base64) for `responseType: 'arraybuffer'` — normalize all.
+ */
+
+/* eslint-disable no-bitwise */
+
+import { NativeModules, PermissionsAndroid, Platform } from 'react-native';
+import RNFS from 'react-native-fs';
+
+const BASE64_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+type FileDownloadNative = {
+  saveToDownloads: (
+    base64: string,
+    filename: string,
+    mimeType: string,
+  ) => Promise<string>;
+};
+
+const FileDownload = NativeModules.FileDownload as FileDownloadNative | undefined;
+
+/** Encode bytes without String.fromCharCode spread (avoids stack overflows on large exports). */
+function bytesToBase64(bytes: Uint8Array): string {
+  let result = '';
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i += 3) {
+    const a = bytes[i];
+    const b = i + 1 < len ? bytes[i + 1] : 0;
+    const c = i + 2 < len ? bytes[i + 2] : 0;
+    const bitmap = (a << 16) | (b << 8) | c;
+    result += BASE64_CHARS.charAt((bitmap >> 18) & 63);
+    result += BASE64_CHARS.charAt((bitmap >> 12) & 63);
+    result += i + 1 < len ? BASE64_CHARS.charAt((bitmap >> 6) & 63) : '=';
+    result += i + 2 < len ? BASE64_CHARS.charAt(bitmap & 63) : '=';
+  }
+  return result;
+}
+
+function binaryStringToBytes(value: string): Uint8Array {
+  const out = new Uint8Array(value.length);
+  for (let i = 0; i < value.length; i += 1) {
+    out[i] = value.charCodeAt(i) & 0xff;
+  }
+  return out;
+}
+
+function looksLikeBase64(value: string): boolean {
+  const trimmed = value.replace(/\s/g, '');
+  if (trimmed.length < 8 || trimmed.length % 4 !== 0) return false;
+  if (trimmed.startsWith('PK') || trimmed.startsWith('%PDF')) return false;
+  return /^[A-Za-z0-9+/]+={0,2}$/.test(trimmed);
+}
+
+function looksLikeJsonError(preview: string): boolean {
+  const trimmed = preview.trimStart();
+  return trimmed.startsWith('{') || trimmed.startsWith('[');
+}
+
+function decodeJsonError(text: string, fallback: string): Error {
+  try {
+    const parsed = JSON.parse(text) as { message?: string; error?: string };
+    return new Error(parsed.message || parsed.error || fallback);
+  } catch {
+    return new Error(text.slice(0, 200) || fallback);
+  }
+}
+
+/** Coerce any axios binary payload into raw bytes. */
+function toUint8Array(data: unknown): Uint8Array {
+  if (data == null) {
+    throw new Error('Export returned an empty file.');
+  }
+
+  if (typeof data === 'string') {
+    if (!data.length) {
+      throw new Error('Export returned an empty file.');
+    }
+    if (looksLikeJsonError(data)) {
+      throw decodeJsonError(data, 'Export failed on the server.');
+    }
+    if (looksLikeBase64(data)) {
+      const binary = globalThis.atob
+        ? globalThis.atob(data.replace(/\s/g, ''))
+        : null;
+      if (binary) return binaryStringToBytes(binary);
+    }
+    return binaryStringToBytes(data);
+  }
+
+  if (data instanceof ArrayBuffer) {
+    return new Uint8Array(data);
+  }
+
+  if (ArrayBuffer.isView(data)) {
+    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  }
+
+  if (Array.isArray(data)) {
+    return Uint8Array.from(data as number[]);
+  }
+
+  throw new Error('Export returned an unsupported file format.');
+}
+
+function toBase64(data: unknown): string {
+  if (typeof data === 'string' && looksLikeBase64(data) && !looksLikeJsonError(data)) {
+    return data.replace(/\s/g, '');
+  }
+  const bytes = toUint8Array(data);
+  if (bytes.byteLength === 0) {
+    throw new Error('Export returned an empty file.');
+  }
+  const previewLen = Math.min(bytes.byteLength, 64);
+  let preview = '';
+  for (let i = 0; i < previewLen; i += 1) {
+    preview += String.fromCharCode(bytes[i]);
+  }
+  if (looksLikeJsonError(preview)) {
+    const textLen = Math.min(bytes.byteLength, 4000);
+    let text = '';
+    for (let i = 0; i < textLen; i += 1) {
+      text += String.fromCharCode(bytes[i]);
+    }
+    throw decodeJsonError(text, 'Export failed on the server.');
+  }
+  return bytesToBase64(bytes);
+}
+
+/** Vehicles.xlsx → Vehicles_1715689200123.xlsx so repeat exports never collide. */
+function uniqueExportFilename(filename: string): string {
+  const safeName = filename.replace(/[^\w.-]/g, '_');
+  const stamp = Date.now();
+  const dot = safeName.lastIndexOf('.');
+  if (dot <= 0) return `${safeName}_${stamp}`;
+  return `${safeName.slice(0, dot)}_${stamp}${safeName.slice(dot)}`;
+}
+
+async function writeFileOverwrite(path: string, base64: string): Promise<void> {
+  try {
+    if (await RNFS.exists(path)) {
+      await RNFS.unlink(path);
+    }
+  } catch {
+    // Continue — writeFile may still succeed even if unlink failed.
+  }
+  await RNFS.writeFile(path, base64, 'base64');
+}
+
+/** Pre-Android 10 still needs WRITE_EXTERNAL_STORAGE for public Downloads. */
+async function ensureLegacyWritePermission(): Promise<void> {
+  if (Platform.OS !== 'android' || Platform.Version >= 29) return;
+
+  const permission = PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE;
+  const hasPermission = await PermissionsAndroid.check(permission);
+  if (hasPermission) return;
+
+  const result = await PermissionsAndroid.request(permission, {
+    title: 'Storage permission',
+    message: 'Allow KarinsFleet to save Excel/PDF files to Downloads.',
+    buttonPositive: 'Allow',
+    buttonNegative: 'Deny',
+  });
+  if (result !== PermissionsAndroid.RESULTS.GRANTED) {
+    throw new Error('Storage permission is required to save the file.');
+  }
+}
+
+/**
+ * Writes export bytes straight to Downloads (Android) or Documents (iOS).
+ * Returns a short location label for success messaging.
+ */
+export async function downloadBinaryFile(
+  data: unknown,
+  filename: string,
+  mimeType: string,
+): Promise<string> {
+  const base64 = toBase64(data);
+  const safeName = uniqueExportFilename(filename);
+
+  if (Platform.OS === 'android') {
+    await ensureLegacyWritePermission();
+
+    // Native MediaStore path — real Downloads entry, no share sheet.
+    if (FileDownload?.saveToDownloads) {
+      return FileDownload.saveToDownloads(base64, safeName, mimeType);
+    }
+
+    // Fallback if the native module is missing from an old build.
+    if (!RNFS.DownloadDirectoryPath) {
+      throw new Error('Downloads folder is unavailable on this device.');
+    }
+    const downloadPath = `${RNFS.DownloadDirectoryPath}/${safeName}`;
+    await writeFileOverwrite(downloadPath, base64);
+    try {
+      await RNFS.scanFile(downloadPath);
+    } catch {
+      // File may still appear after a short delay.
+    }
+    return `Downloads/${safeName}`;
+  }
+
+  // iOS: app Documents is the user-visible Files location for this app.
+  const path = `${RNFS.DocumentDirectoryPath}/${safeName}`;
+  await writeFileOverwrite(path, base64);
+  return `Files/${safeName}`;
+}

@@ -1,0 +1,14 @@
+diff --git a/node_modules/@react-native-community/cli-config-apple/build/tools/pods.js b/node_modules/@react-native-community/cli-config-apple/build/tools/pods.js
+index c5cadc5..aea35a3 100644
+--- a/node_modules/@react-native-community/cli-config-apple/build/tools/pods.js
++++ b/node_modules/@react-native-community/cli-config-apple/build/tools/pods.js
+@@ -116,7 +116,8 @@ async function resolvePods(root, sourceDir, nativeDependencies, platformName, re
+   const podfilePath = _path().default.join(sourceDir, 'Podfile'); // sourceDir is calculated based on Podfile location, see getProjectConfig()
+ 
+   const podfileLockPath = _path().default.join(sourceDir, 'Podfile.lock');
+-  const platformFolderPath = podfilePath ? podfilePath.slice(0, podfilePath.lastIndexOf('/')) : _path().default.join(root, platformName);
++  // Use path.dirname so Windows backslash paths work (lastIndexOf('/') wrongly truncates Podfile -> Podfil)
++  const platformFolderPath = podfilePath ? _path().default.dirname(podfilePath) : _path().default.join(root, platformName);
+   const podsPath = _path().default.join(platformFolderPath, 'Pods');
+   const arePodsInstalled = _fsExtra().default.existsSync(podsPath);
+   const platformDependencies = getPlatformDependencies(nativeDependencies, platformName);

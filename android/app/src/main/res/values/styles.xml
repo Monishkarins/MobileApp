@@ -1,0 +1,30 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+
+    <!--
+      Edge-to-edge via react-native-edge-to-edge Theme.EdgeToEdge.
+      Do NOT set android:statusBarColor / navigationBarColor / SHORT_EDGES here —
+      those Window APIs and cutout modes are deprecated on Android 15+ and are
+      what Play Console flags. Theme.EdgeToEdge (API 30+) uses cutout mode
+      "always" and transparent bars without calling the deprecated setters from
+      our Activity code.
+    -->
+    <style name="AppTheme" parent="Theme.EdgeToEdge">
+        <item name="android:editTextBackground">@drawable/rn_edit_text_material</item>
+        <item name="android:windowBackground">@color/app_window_background</item>
+        <!-- Keep a light scrim on 3-button nav; gesture nav stays transparent. -->
+        <item name="enforceNavigationBarContrast">true</item>
+        <!-- Remain opted in to Android 15+ edge-to-edge enforcement. -->
+        <item name="android:windowOptOutEdgeToEdgeEnforcement" tools:targetApi="35">false</item>
+    </style>
+
+    <!-- Passive face unlock — translucent overlay; still EdgeToEdge parent for cutout safety. -->
+    <style name="FaceLockPassiveTheme" parent="Theme.EdgeToEdge">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="enforceNavigationBarContrast">true</item>
+        <item name="android:windowOptOutEdgeToEdgeEnforcement" tools:targetApi="35">false</item>
+    </style>
+
+</resources>

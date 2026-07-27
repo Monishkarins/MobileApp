@@ -1,0 +1,134 @@
+diff --git a/node_modules/@react-native/gradle-plugin/gradle/libs.versions.toml b/node_modules/@react-native/gradle-plugin/gradle/libs.versions.toml
+index c7502fc..2370f40 100644
+--- a/node_modules/@react-native/gradle-plugin/gradle/libs.versions.toml
++++ b/node_modules/@react-native/gradle-plugin/gradle/libs.versions.toml
+@@ -1,5 +1,5 @@
+ [versions]
+-agp = "8.12.0"
++agp = "9.0.1"
+ gson = "2.8.9"
+ guava = "31.0.1-jre"
+ javapoet = "1.13.0"
+diff --git a/node_modules/@react-native/gradle-plugin/react-native-gradle-plugin/src/main/kotlin/com/facebook/react/ReactPlugin.kt b/node_modules/@react-native/gradle-plugin/react-native-gradle-plugin/src/main/kotlin/com/facebook/react/ReactPlugin.kt
+index e7859ff..692f2fa 100644
+--- a/node_modules/@react-native/gradle-plugin/react-native-gradle-plugin/src/main/kotlin/com/facebook/react/ReactPlugin.kt
++++ b/node_modules/@react-native/gradle-plugin/react-native-gradle-plugin/src/main/kotlin/com/facebook/react/ReactPlugin.kt
+@@ -20,6 +20,7 @@ import com.facebook.react.utils.AgpConfiguratorUtils.configureBuildConfigFieldsF
+ import com.facebook.react.utils.AgpConfiguratorUtils.configureBuildConfigFieldsForLibraries
+ import com.facebook.react.utils.AgpConfiguratorUtils.configureBuildTypesForApp
+ import com.facebook.react.utils.AgpConfiguratorUtils.configureDevServerLocation
++import com.facebook.react.utils.AgpConfiguratorUtils.configureNamespaceForAllLibraries
+ import com.facebook.react.utils.AgpConfiguratorUtils.configureNamespaceForLibraries
+ import com.facebook.react.utils.BackwardCompatUtils.configureBackwardCompatibilityReactMap
+ import com.facebook.react.utils.DependencyUtils.configureDependencies
+@@ -95,12 +96,17 @@ class ReactPlugin : Plugin<Project> {
+       configureCodegen(project, extension, rootExtension, isLibrary = false)
+       configureResources(project, extension)
+       configureBuildTypesForApp(project)
++      // Once from the app: infer namespace for third-party libs that still rely on
++      // AndroidManifest package= (e.g. react-native-fs). Must not run per-library.
++      configureNamespaceForAllLibraries(project)
+     }
+ 
+-    // Library Only Configuration
+-    configureBuildConfigFieldsForLibraries(project)
+-    configureNamespaceForLibraries(project)
++    // Library Only Configuration - register finalizeDsl only after com.android.library
++    // is applied, and only for this project. AGP 9 errors if finalizeDsl runs after
++    // DSL finalization when every library re-walks rootProject.allprojects.
+     project.pluginManager.withPlugin("com.android.library") {
++      configureBuildConfigFieldsForLibraries(project)
++      configureNamespaceForLibraries(project)
+       configureCodegen(project, extension, rootExtension, isLibrary = true)
+     }
+   }
+diff --git a/node_modules/@react-native/gradle-plugin/react-native-gradle-plugin/src/main/kotlin/com/facebook/react/utils/AgpConfiguratorUtils.kt b/node_modules/@react-native/gradle-plugin/react-native-gradle-plugin/src/main/kotlin/com/facebook/react/utils/AgpConfiguratorUtils.kt
+index c4a7b35..69bd45b 100644
+--- a/node_modules/@react-native/gradle-plugin/react-native-gradle-plugin/src/main/kotlin/com/facebook/react/utils/AgpConfiguratorUtils.kt
++++ b/node_modules/@react-native/gradle-plugin/react-native-gradle-plugin/src/main/kotlin/com/facebook/react/utils/AgpConfiguratorUtils.kt
+@@ -9,7 +9,6 @@ package com.facebook.react.utils
+ 
+ import com.android.build.api.variant.ApplicationAndroidComponentsExtension
+ import com.android.build.api.variant.LibraryAndroidComponentsExtension
+-import com.android.build.gradle.LibraryExtension
+ import com.facebook.react.ReactExtension
+ import com.facebook.react.utils.ProjectUtils.isEdgeToEdgeEnabled
+ import com.facebook.react.utils.ProjectUtils.isHermesEnabled
+@@ -18,7 +17,6 @@ import java.net.Inet4Address
+ import java.net.NetworkInterface
+ import javax.xml.parsers.DocumentBuilder
+ import javax.xml.parsers.DocumentBuilderFactory
+-import kotlin.plus
+ import org.gradle.api.Action
+ import org.gradle.api.Project
+ import org.gradle.api.plugins.AppliedPlugin
+@@ -77,13 +75,11 @@ internal object AgpConfiguratorUtils {
+     project.pluginManager.withPlugin("com.android.library", action)
+   }
+ 
+-  fun configureBuildConfigFieldsForLibraries(appProject: Project) {
+-    appProject.rootProject.allprojects { subproject ->
+-      subproject.pluginManager.withPlugin("com.android.library") {
+-        subproject.extensions
+-            .getByType(LibraryAndroidComponentsExtension::class.java)
+-            .finalizeDsl { ext -> ext.buildFeatures.buildConfig = true }
+-      }
++  // Configure only the current library project - AGP 9 rejects late finalizeDsl
++  // registration when every library plugin walks rootProject.allprojects.
++  fun configureBuildConfigFieldsForLibraries(project: Project) {
++    project.extensions.getByType(LibraryAndroidComponentsExtension::class.java).finalizeDsl { ext ->
++      ext.buildFeatures.buildConfig = true
+     }
+   }
+ 
+@@ -111,28 +107,33 @@ internal object AgpConfiguratorUtils {
+     project.pluginManager.withPlugin("com.android.library", action)
+   }
+ 
+-  fun configureNamespaceForLibraries(appProject: Project) {
+-    appProject.rootProject.allprojects { subproject ->
+-      subproject.pluginManager.withPlugin("com.android.library") {
+-        subproject.extensions
+-            .getByType(LibraryAndroidComponentsExtension::class.java)
+-            .finalizeDsl { ext ->
+-              if (ext.namespace == null) {
+-                val android = subproject.extensions.getByType(LibraryExtension::class.java)
+-                val manifestFile = android.sourceSets.getByName("main").manifest.srcFile
+-
+-                manifestFile
+-                    .takeIf { it.exists() }
+-                    ?.let { file ->
+-                      getPackageNameFromManifest(file)?.let { packageName ->
+-                        ext.namespace = packageName
+-                      }
+-                    }
++  // Infer namespace from the conventional manifest path when libraries omit it.
++  // Avoids the deprecated LibraryExtension sourceSets API removed from AGP 9's public DSL.
++  fun configureNamespaceForLibraries(project: Project) {
++    project.extensions.getByType(LibraryAndroidComponentsExtension::class.java).finalizeDsl { ext ->
++      if (ext.namespace == null) {
++        val manifestFile =
++            project.layout.projectDirectory.file("src/main/AndroidManifest.xml").asFile
++        manifestFile
++            .takeIf { it.exists() }
++            ?.let { file ->
++              getPackageNameFromManifest(file)?.let { packageName ->
++                ext.namespace = packageName
+               }
+             }
+       }
+     }
+   }
++
++  // Called once from the app project so older autolinked libraries without a
++  // namespace DSL entry still configure before AGP 9 variant creation.
++  fun configureNamespaceForAllLibraries(appProject: Project) {
++    appProject.rootProject.allprojects { subproject ->
++      subproject.pluginManager.withPlugin("com.android.library") {
++        configureNamespaceForLibraries(subproject)
++      }
++    }
++  }
+ }
+ 
+ const val DEFAULT_DEV_SERVER_PORT = "8081"

@@ -1,0 +1,67 @@
+{
+  "project_info": {
+    "project_number": "220820054552",
+    "project_id": "karins-bc982",
+    "storage_bucket": "karins-bc982.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:220820054552:android:31b3d1b43d445fd0d4196d",
+        "android_client_info": {
+          "package_name": "com.karins"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA-FBKnLpLAkJ4AbB277zy0FwcAFrFGT1o"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:220820054552:android:f100c08b58ad4ee5d4196d",
+        "android_client_info": {
+          "package_name": "com.karins.crm"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA-FBKnLpLAkJ4AbB277zy0FwcAFrFGT1o"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:220820054552:android:3d15575eb8c7cec0d4196d",
+        "android_client_info": {
+          "package_name": "com.karinsfleet"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA-FBKnLpLAkJ4AbB277zy0FwcAFrFGT1o"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

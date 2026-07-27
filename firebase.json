@@ -1,0 +1,6 @@
+{
+  "react-native": {
+    "messaging_android_notification_channel_id": "karins_fleet_alerts_high",
+    "messaging_android_notification_color": "@android:color/holo_blue_light"
+  }
+}

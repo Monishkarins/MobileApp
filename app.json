@@ -1,0 +1,15 @@
+{
+  "name": "KarinsFleet",
+  "displayName": "KarinsFleet",
+  "expo": {
+    "name": "KarinsFleet",
+    "slug": "karins-fleet",
+    "version": "2.1.0",
+    "ios": {
+      "bundleIdentifier": "com.karins"
+    },
+    "android": {
+      "package": "com.karins"
+    }
+  }
+}

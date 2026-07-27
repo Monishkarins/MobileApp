@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  API 35+: Android enforces edge-to-edge. Avoid theme attrs that map to
+  deprecated Window.setStatusBarColor / setNavigationBarColor /
+  LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES (Play Console warnings).
+-->
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <style name="AppTheme" parent="Theme.EdgeToEdge">
+        <item name="android:editTextBackground">@drawable/rn_edit_text_material</item>
+        <item name="android:windowBackground">@color/app_window_background</item>
+        <item name="enforceNavigationBarContrast">true</item>
+        <item name="android:windowOptOutEdgeToEdgeEnforcement" tools:targetApi="35">false</item>
+        <!-- Prefer ALWAYS over SHORT_EDGES / DEFAULT (deprecated for targetSdk 35+). -->
+        <item name="android:windowLayoutInDisplayCutoutMode">always</item>
+    </style>
+
+    <style name="FaceLockPassiveTheme" parent="Theme.EdgeToEdge">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="enforceNavigationBarContrast">true</item>
+        <item name="android:windowOptOutEdgeToEdgeEnforcement" tools:targetApi="35">false</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">always</item>
+    </style>
+</resources>
