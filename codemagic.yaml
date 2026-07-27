@@ -11,6 +11,9 @@ workflows:
       vars:
         XCODE_WORKSPACE: "KarinsFleet.xcworkspace"
         XCODE_SCHEME: "KarinsFleet"
+        # RN 0.86 prebuilt deps hide RCT-Folly; older pods like RNShare still require it
+        RCT_USE_PREBUILT_RNCORE: "0"
+        RCT_USE_RN_DEP: "0"
       node: 20
       xcode: latest
       cocoapods: default
