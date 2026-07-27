@@ -91,6 +91,10 @@ export const signIn = createAsyncThunk<
 
     const { data } = await authApi.signIn(payload);
 
+    if (!data?.accessToken) {
+      return rejectWithValue('Sign-in succeeded but no access token was returned.');
+    }
+
     // Block staff roles from the mobile app — treat as invalid credentials.
     if (isMobileAppLoginBlocked(data.roleKey)) {
       await SecureStorage.prepareForSignIn();
@@ -100,10 +104,24 @@ export const signIn = createAsyncThunk<
 
     const sessionUser = buildSessionUser(data);
 
-    await persistSession(data.accessToken, sessionUser, payload.username.trim());
+    try {
+      await persistSession(data.accessToken, sessionUser, payload.username.trim());
+    } catch (persistError: unknown) {
+      await SecureStorage.prepareForSignIn();
+      invalidateApiSession();
+      return rejectWithValue(
+        getApiErrorMessage(persistError, 'Could not save session on this device. Try again.'),
+      );
+    }
+
     SecureStorage.setLastLoginMobile(payload.username.trim());
 
-    await syncPinLoginPreference(payload.username.trim());
+    // PIN preference is best-effort — must not fail an otherwise successful sign-in.
+    try {
+      await syncPinLoginPreference(payload.username.trim());
+    } catch {
+      // Ignore — user can still use password login.
+    }
 
     // Register FCM token with backend as soon as the session is persisted.
     void registerPushDevice();

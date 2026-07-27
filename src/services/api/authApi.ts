@@ -9,8 +9,9 @@ import type {
 export const authApi = {
   // Shared web auth route — no dedicated /auth/mobile/signIn exists on the
   // backend, so reuse /auth/signIn (extra device fields are simply ignored).
+  // Access token comes from the response body (Bearer); cookies are not required.
   signIn: (payload: LoginPayload) =>
-    apiClient.post<LoginResponse>('/auth/signIn', payload, { withCredentials: true }),
+    apiClient.post<LoginResponse>('/auth/signIn', payload),
 
   /** Refresh access token using HTTP-only cookie */
   refresh: () =>
@@ -58,7 +59,7 @@ export const authApi = {
 
   /** Sign in with account PIN (mobile quick login). */
   pinSignIn: (payload: PinSignInPayload) =>
-    apiClient.post<LoginResponse>('/auth/pin/signIn', payload, { withCredentials: true }),
+    apiClient.post<LoginResponse>('/auth/pin/signIn', payload),
 
   /** Check whether the account has a PIN configured. */
   pinStatus: (mobileNumber: string) =>

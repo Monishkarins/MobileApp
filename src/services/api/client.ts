@@ -46,7 +46,8 @@ function processQueue(error: unknown, token: string | null): void {
 export const apiClient: AxiosInstance = axios.create({
   baseURL: BASE_URL,
   timeout: TIMEOUT_MS,
-  withCredentials: true, // send HTTP-only cookie for refresh token
+  // Cookies are optional for Bearer login; false avoids rare iOS cookie-jar failures on cloud simulators.
+  withCredentials: false,
   headers: {
     'Content-Type': 'application/json',
     'X-App-Platform': 'mobile',
