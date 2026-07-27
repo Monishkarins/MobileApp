@@ -13,33 +13,33 @@ workflows:
           npm install
 
       - name: Install CocoaPods
-  script: |
-    cd ios
-    echo "Current directory:"
-    pwd
+        script: |
+          cd ios
+          echo "Current directory:"
+          pwd
 
-    echo "Before pod install:"
-    ls -la
+          echo "Before pod install:"
+          ls -la
 
-    pod install --repo-update
+          pod install --repo-update
 
-    echo "After pod install:"
-    ls -la
+          echo "After pod install:"
+          ls -la
 
-    find . -name "*.xcworkspace"
+          find . -name "*.xcworkspace"
 
-    cd ..
+          cd ..
 
       - name: Build iOS
-  script: |
-    echo "Listing ios directory"
-    ls -la ios
+        script: |
+          echo "Listing ios directory"
+          ls -la ios
 
-    find ios -name "*.xcworkspace"
+          find ios -name "*.xcworkspace"
 
-    xcode-project build-ipa \
-      --workspace ios/KarinsFleet.xcworkspace \
-      --scheme KarinsFleet
+          xcode-project build-ipa \
+            --workspace ios/KarinsFleet.xcworkspace \
+            --scheme KarinsFleet
 
     artifacts:
       - build/ios/ipa/*.ipa
