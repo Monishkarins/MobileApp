@@ -2,9 +2,9 @@ import axios, { AxiosInstance, AxiosRequestConfig, InternalAxiosRequestConfig } 
 import { API_BASE_URL } from '../../config/env';
 import { SecureStorage } from '../storage/SecureStorage';
 
-// fleet.karins.in serves the web SPA (nginx returns 405 on POST); API lives on testapi.
+// fleet.karins.in serves the web SPA (nginx returns 405 on POST); API is api.karins.in.
 const BASE_URL = API_BASE_URL;
-const TIMEOUT_MS = 15_000;
+const TIMEOUT_MS = 20_000;
 
 // Queue of requests waiting for token refresh
 let isRefreshing = false;
@@ -263,15 +263,21 @@ export interface ApiError {
 export function getApiErrorMessage(error: unknown, fallback = 'Something went wrong'): string {
   if (error && typeof error === 'object' && 'message' in error) {
     const message = (error as ApiError).message;
-    if (typeof message === 'string' && message.trim()) return message;
+    if (typeof message === 'string' && message.trim()) {
+      // Nginx/HTML bodies are not useful in the UI — map common cases.
+      if (/<!DOCTYPE html|/i.test(message) || /<pre>Bad Request<\/pre>/i.test(message)) {
+        return 'Invalid mobile number or password.';
+      }
+      return message.trim();
+    }
   }
   if (axios.isAxiosError(error)) {
-    return (
-      error.response?.data?.message
-      ?? error.response?.data?.error
-      ?? error.message
-      ?? fallback
-    );
+    const fromBody = messageFromResponseData(error.response?.data);
+    if (fromBody && !/^<!DOCTYPE html/i.test(fromBody) && !/<pre>Bad Request<\/pre>/i.test(fromBody)) {
+      return fromBody;
+    }
+    const status = error.response?.status ?? 0;
+    return fallbackMessageForStatus(status, error.message);
   }
   if (error instanceof Error && error.message) return error.message;
   return fallback;
@@ -281,11 +287,16 @@ export function getApiErrorMessage(error: unknown, fallback = 'Something went wr
 function messageFromResponseData(data: unknown): string | undefined {
   if (data == null) return undefined;
   if (typeof data === 'string') {
+    const trimmed = data.trim();
+    // Ignore HTML error pages from nginx/express defaults.
+    if (/^<!DOCTYPE html/i.test(trimmed) || /^<html/i.test(trimmed)) {
+      return undefined;
+    }
     try {
-      const parsed = JSON.parse(data) as { message?: string; error?: string };
-      return parsed.message || parsed.error || data.slice(0, 200);
+      const parsed = JSON.parse(trimmed) as { message?: string; error?: string };
+      return parsed.message || parsed.error || trimmed.slice(0, 200);
     } catch {
-      return data.slice(0, 200);
+      return trimmed.slice(0, 200);
     }
   }
   if (typeof data === 'object' && !(data instanceof ArrayBuffer) && !ArrayBuffer.isView(data)) {
@@ -297,6 +308,9 @@ function messageFromResponseData(data: unknown): string | undefined {
       const bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data.buffer);
       const text = String.fromCharCode(...bytes.subarray(0, Math.min(bytes.byteLength, 4000)));
       const trimmed = text.trim();
+      if (/^<!DOCTYPE html/i.test(trimmed) || /^<html/i.test(trimmed)) {
+        return undefined;
+      }
       if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
         const parsed = JSON.parse(trimmed) as { message?: string; error?: string };
         return parsed.message || parsed.error;

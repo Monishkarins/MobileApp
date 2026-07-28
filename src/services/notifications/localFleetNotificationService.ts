@@ -31,9 +31,13 @@ function isOnCooldown(id: string, body: string): boolean {
 /** Display a dashboard-derived alert in the system tray when its category toggle is on. */
 export async function showDerivedFleetPush(notification: FleetNotification): Promise<void> {
   if (!isCategoryAlertsEnabled(notification.category)) return;
-  if (isOnCooldown(notification.id, notification.body)) return;
 
-  const shown = await pushService.displayLocalNotification(notification);
+  // Always refresh the tray row (MessagingStyle / full body). Cooldown only
+  // suppresses sound/heads-up so dashboard polling does not keep buzzing.
+  const onCooldown = isOnCooldown(notification.id, notification.body);
+  const shown = await pushService.displayLocalNotification(notification, {
+    onlyAlertOnce: onCooldown,
+  });
   if (shown) {
     saveCooldown(notification.id, notification.body);
   }

@@ -83,17 +83,28 @@ function wrapNotificationLines(text: string, maxChars = ANDROID_NOTIFICATION_WRA
 }
 
 /**
- * Prefer Inbox style when there are multiple lines — each line is shown on its
- * own row in the shade. Fall back to BigText for a single wrapped paragraph.
+ * Multi-line fleet alerts use MessagingStyle — Android shows several message
+ * rows in the shade without requiring the user to tap expand (Inbox/BigText
+ * only reveal the full copy after expand, which is why users saw "...").
  */
-function buildAndroidTextStyle(text: string) {
+function buildAndroidTextStyle(text: string, title?: string) {
   const lines = wrapNotificationLines(text);
+  const now = Date.now();
+
   if (lines.length > 1) {
+    const person = { name: 'Karins Fleet' };
     return {
-      type: AndroidStyle.INBOX as const,
-      lines,
+      type: AndroidStyle.MESSAGING as const,
+      person,
+      title: title || 'Karins Fleet',
+      messages: lines.map((line, index) => ({
+        text: line,
+        timestamp: now + index,
+        person,
+      })),
     };
   }
+
   return {
     type: AndroidStyle.BIGTEXT as const,
     text: lines[0] ?? text,
@@ -199,7 +210,10 @@ export const pushService = {
   },
 
   /** Show a fleet alert in the system tray (dashboard-derived or local). */
-  async displayLocalNotification(notification: FleetNotification): Promise<boolean> {
+  async displayLocalNotification(
+    notification: FleetNotification,
+    options?: { onlyAlertOnce?: boolean },
+  ): Promise<boolean> {
     try {
       await pushService.ensureAndroidChannel();
 
@@ -209,8 +223,8 @@ export const pushService = {
       }
       if (!canShow) return false;
 
-      // Full message goes in body + Inbox/BigText style so overflow wraps to the
-      // next line in the shade instead of ending with "...".
+      // Full message goes in body; MessagingStyle shows each line in the shade
+      // without requiring the user to tap the expand chevron.
       const fullText = notification.detail ?? notification.body;
       await notifee.displayNotification({
         id: notification.id,
@@ -228,7 +242,9 @@ export const pushService = {
           largeIcon: ANDROID_NOTIFICATION_LARGE_ICON,
           importance: AndroidImportance.HIGH,
           sound: 'default',
-          style: buildAndroidTextStyle(fullText),
+          // Re-sync updates the tray row quietly so MessagingStyle replaces old "...".
+          onlyAlertOnce: options?.onlyAlertOnce ?? false,
+          style: buildAndroidTextStyle(fullText, notification.title),
         },
         ios: {
           foregroundPresentationOptions: {
@@ -357,8 +373,8 @@ export const pushService = {
           largeIcon: ANDROID_NOTIFICATION_LARGE_ICON,
           importance: AndroidImportance.HIGH,
           sound: 'default',
-          // Wrap long FCM bodies onto following lines instead of truncating with "...".
-          style: buildAndroidTextStyle(mapped.body),
+          // MessagingStyle shows multi-line FCM copy without requiring expand.
+          style: buildAndroidTextStyle(mapped.body, mapped.title),
         },
       });
     } catch {

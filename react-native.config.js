@@ -1,6 +1,6 @@
 /**
  * React Native asset + platform linking config.
- * Firebase is Android-only for now — disabled on iOS so CocoaPods does not pull RNFB.
+ * Firebase is enabled on both platforms now that GoogleService-Info.plist exists.
  * Run `npx react-native-asset` after adding files under assets/fonts.
  */
 module.exports = {
@@ -9,17 +9,4 @@ module.exports = {
     android: {},
   },
   assets: ['./assets/fonts/'],
-  dependencies: {
-    // No GoogleService-Info.plist / iOS push setup yet — keep RNFB off the iOS target
-    '@react-native-firebase/app': {
-      platforms: {
-        ios: null,
-      },
-    },
-    '@react-native-firebase/messaging': {
-      platforms: {
-        ios: null,
-      },
-    },
-  },
 };

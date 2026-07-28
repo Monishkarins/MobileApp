@@ -4,8 +4,8 @@
  * SECURITY / CORRECTNESS:
  * - Mock data is gated to DEV builds only. In a release build `__DEV__` is
  *   `false`, so `ENABLE_MOCK_DATA` is always `false` — mock data can never ship.
- * - The API base URL is read from the native env (react-native-dotenv `@env`)
- *   with a safe production default. It is NOT hardcoded per-screen.
+ * - The API base URL is read from the native env when provided, otherwise the
+ *   production host used by the Android APK.
  */
 
 declare const __DEV__: boolean;
@@ -20,8 +20,8 @@ export const IS_DEV: boolean =
 export const ENABLE_MOCK_DATA: boolean = IS_DEV;
 
 /**
- * API base URL. Override at build time via the `KARINS_API_URL` env var
- * (see `.env.example`). Falls back to production.
+ * API base URL — same production host as the working Android APK.
+ * Override at build time via KARINS_API_URL if needed.
  */
 export const API_BASE_URL: string =
   (typeof process !== 'undefined' && process.env && process.env.KARINS_API_URL) ||

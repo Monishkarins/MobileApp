@@ -107,7 +107,11 @@ export const signIn = createAsyncThunk<
     try {
       await persistSession(data.accessToken, sessionUser, payload.username.trim());
     } catch (persistError: unknown) {
-      await SecureStorage.prepareForSignIn();
+      try {
+        await SecureStorage.prepareForSignIn();
+      } catch {
+        // ignore
+      }
       invalidateApiSession();
       return rejectWithValue(
         getApiErrorMessage(persistError, 'Could not save session on this device. Try again.'),
@@ -128,9 +132,13 @@ export const signIn = createAsyncThunk<
 
     return { user: sessionUser };
   } catch (error: unknown) {
-    await SecureStorage.prepareForSignIn();
+    // Cleanup must never swallow the real sign-in error (Keychain throws on Appetize).
+    try {
+      await SecureStorage.prepareForSignIn();
+    } catch {
+      // ignore
+    }
     invalidateApiSession();
-    // Prefer normalized ApiError.message so Appetize/network failures are not a blank generic.
     return rejectWithValue(getApiErrorMessage(error, 'Unable to sign in. Please try again.'));
   }
 });
@@ -171,7 +179,11 @@ export const signInWithPin = createAsyncThunk<
 
     return { user: sessionUser };
   } catch (error: unknown) {
-    await SecureStorage.prepareForSignIn();
+    try {
+      await SecureStorage.prepareForSignIn();
+    } catch {
+      // ignore
+    }
     invalidateApiSession();
     return rejectWithValue(getApiErrorMessage(error, 'PIN sign-in failed.'));
   }

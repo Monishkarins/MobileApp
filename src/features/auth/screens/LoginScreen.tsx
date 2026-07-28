@@ -47,10 +47,11 @@ export default function LoginScreen({ navigation }: Props) {
     }));
 
     if (!signIn.fulfilled.match(result)) {
-      // Surface the real failure (network / credentials / device) — Appetize hides logs.
-      const message = typeof result.payload === 'string'
-        ? result.payload
-        : 'Unable to sign in. Please try again.';
+      // Prefer rejectWithValue string; then RTK error message; never show a blank alert.
+      const message =
+        (typeof result.payload === 'string' && result.payload.trim())
+        || (typeof result.error?.message === 'string' && result.error.message.trim())
+        || 'Unable to sign in. Please try again.';
       Alert.alert('Sign in failed', message);
       return;
     }

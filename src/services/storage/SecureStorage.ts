@@ -1,4 +1,11 @@
+/**
+ * Secure session storage — Keychain for tokens, MMKV for non-secret metadata.
+ * Keychain ops are best-effort: cloud iOS simulators (Appetize) can throw on
+ * reset/set; a silent failure must never block password sign-in.
+ */
+
 import * as Keychain from 'react-native-keychain';
+import { Platform } from 'react-native';
 import { MMKV } from 'react-native-mmkv';
 import { clearHttpCookies } from '../auth/httpCookies';
 
@@ -19,6 +26,9 @@ const KEYCHAIN_KEYS = {
   deviceId: 'device_id',
 } as const;
 
+// Fallback when iOS Keychain is unavailable (Appetize / broken simulator keychain).
+const MMKV_ACCESS_TOKEN_KEY = 'access_token_fallback';
+
 // Non-secret session metadata (role, customer, display name) kept in MMKV so the
 // app can rehydrate the logged-in user on cold start without a network round-trip.
 const SESSION_USER_KEY = 'session_user';
@@ -27,33 +37,51 @@ const DASHBOARD_CONTEXT_KEY = 'dashboard_context';
 // Last successful password login mobile — used for PIN setup and quick login.
 const LAST_LOGIN_MOBILE_KEY = 'last_login_mobile';
 
+/** AFTER_FIRST_UNLOCK is the most reliable option on Appetize / iOS Simulator. */
+const TOKEN_ACCESSIBLE = Keychain.ACCESSIBLE.AFTER_FIRST_UNLOCK;
+
 export const SecureStorage = {
   // ── Access Token ─────────────────────────────────────────────────────────
   async setAccessToken(token: string): Promise<void> {
-    await Keychain.setGenericPassword(
-      KEYCHAIN_KEYS.accessToken,
-      token,
-      {
-        service: KEYCHAIN_SERVICE,
-        // WHEN_UNLOCKED works on real devices and cloud simulators (Appetize);
-        // THIS_DEVICE_ONLY has failed session persist on some iOS simulator hosts.
-        accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED,
-      },
-    );
+    try {
+      await Keychain.setGenericPassword(
+        KEYCHAIN_KEYS.accessToken,
+        token,
+        {
+          service: KEYCHAIN_SERVICE,
+          accessible: TOKEN_ACCESSIBLE,
+        },
+      );
+      // Clear any prior MMKV fallback once Keychain write succeeds.
+      mmkvCache.delete(MMKV_ACCESS_TOKEN_KEY);
+      return;
+    } catch {
+      // Appetize / simulator Keychain often rejects writes — keep session alive in MMKV.
+      if (Platform.OS === 'ios') {
+        mmkvCache.set(MMKV_ACCESS_TOKEN_KEY, token);
+        return;
+      }
+      throw new Error('Could not save access token on this device.');
+    }
   },
 
   async getAccessToken(): Promise<string | null> {
     try {
       const creds = await Keychain.getGenericPassword({ service: KEYCHAIN_SERVICE });
       if (creds && creds.username === KEYCHAIN_KEYS.accessToken) return creds.password;
-      return null;
     } catch {
-      return null;
+      // Fall through to MMKV fallback below.
     }
+    return mmkvCache.getString(MMKV_ACCESS_TOKEN_KEY) ?? null;
   },
 
   async removeAccessToken(): Promise<void> {
-    await Keychain.resetGenericPassword({ service: KEYCHAIN_SERVICE });
+    try {
+      await Keychain.resetGenericPassword({ service: KEYCHAIN_SERVICE });
+    } catch {
+      // Ignore — missing/broken Keychain must not block sign-in cleanup.
+    }
+    mmkvCache.delete(MMKV_ACCESS_TOKEN_KEY);
   },
 
   // ── Quick PIN login preference (device-level) ────────────────────────────
@@ -109,11 +137,15 @@ export const SecureStorage = {
 
   // ── Device ID ────────────────────────────────────────────────────────────
   async setDeviceId(id: string): Promise<void> {
-    await Keychain.setInternetCredentials(
-      KEYCHAIN_KEYS.deviceId,
-      KEYCHAIN_KEYS.deviceId,
-      id,
-    );
+    try {
+      await Keychain.setInternetCredentials(
+        KEYCHAIN_KEYS.deviceId,
+        KEYCHAIN_KEYS.deviceId,
+        id,
+      );
+    } catch {
+      // Device id is optional for password login.
+    }
   },
 
   async getDeviceId(): Promise<string | null> {
@@ -139,12 +171,24 @@ export const SecureStorage = {
     return authMeta.contains(CAN_RESTORE_SESSION_KEY);
   },
 
-  /** Drop any saved credentials before a fresh password sign-in. */
+  /** Drop any saved credentials before a fresh password sign-in — never throws. */
   async prepareForSignIn(): Promise<void> {
-    SecureStorage.setSessionRestorable(false);
-    await clearHttpCookies();
+    try {
+      SecureStorage.setSessionRestorable(false);
+    } catch {
+      // ignore
+    }
+    try {
+      await clearHttpCookies();
+    } catch {
+      // ignore
+    }
     await SecureStorage.removeAccessToken();
-    SecureStorage.clearSessionUser();
+    try {
+      SecureStorage.clearSessionUser();
+    } catch {
+      // ignore
+    }
   },
 
   /**
@@ -152,11 +196,12 @@ export const SecureStorage = {
    * PIN login preference is kept so the login screen can still offer PIN sign-in.
    */
   async clearSession(): Promise<void> {
-    SecureStorage.setSessionRestorable(false);
-    await clearHttpCookies();
-    await SecureStorage.removeAccessToken();
-    SecureStorage.clearSessionUser();
-    mmkvCache.delete(DASHBOARD_CONTEXT_KEY);
+    await SecureStorage.prepareForSignIn();
+    try {
+      mmkvCache.delete(DASHBOARD_CONTEXT_KEY);
+    } catch {
+      // ignore
+    }
   },
 
   // ── Clear All (on logout) ────────────────────────────────────────────────
@@ -166,7 +211,11 @@ export const SecureStorage = {
     const lastLoginMobile = SecureStorage.getLastLoginMobile();
 
     await SecureStorage.clearSession();
-    mmkvCache.clearAll();
+    try {
+      mmkvCache.clearAll();
+    } catch {
+      // ignore
+    }
 
     if (pinLoginEnabled && pinLoginMobile) {
       SecureStorage.setPinLoginEnabled(true);
