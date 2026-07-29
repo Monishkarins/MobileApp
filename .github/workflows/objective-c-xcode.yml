@@ -13,8 +13,8 @@ jobs:
     env:
       TEAM_ID: 769D8U522H
       BUNDLE_ID: com.karins
-      # Do not pull an empty KEYCHAIN_PASSWORD secret — it breaks create/unlock.
-      KEYCHAIN_PASSWORD: Karins@54321
+      # Temporary runner keychain only — not an Apple secret. Keep non-empty.
+      KEYCHAIN_PASSWORD: github-actions-keychain
 
     steps:
       - name: Checkout source
