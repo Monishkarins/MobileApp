@@ -1,0 +1,69 @@
+name: React Native iOS Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    env:
+      KEYCHAIN_PASSWORD: github
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install CocoaPods
+        run: |
+          cd ios
+          pod install
+
+      - name: Show available schemes
+        run: |
+          cd ios
+          xcodebuild -workspace Karins.xcworkspace -list
+
+      - name: Install Distribution Certificate
+        env:
+          BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+        run: |
+          echo "$BUILD_CERTIFICATE_BASE64" | base64 --decode > certificate.p12
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+
+          security import certificate.p12 \
+            -k build.keychain \
+            -P "$P12_PASSWORD" \
+            -A \
+            -T /usr/bin/codesign
+
+          security set-key-partition-list \
+            -S apple-tool:,apple: \
+            -s \
+            -k "$KEYCHAIN_PASSWORD" \
+            build.keychain
+
+      - name: Build iOS
+        run: |
+          xcodebuild \
+            -workspace ios/Karins.xcworkspace \
+            -scheme karins \
+            -configuration Debug \
+            -destination 'generic/platform=iOS' \
+            clean build
