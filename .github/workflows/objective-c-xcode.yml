@@ -1,0 +1,43 @@
+name: React Native iOS Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install CocoaPods
+        run: |
+          cd ios
+          pod install
+
+      - name: Show available schemes
+        run: |
+          cd ios
+          xcodebuild -workspace Karins.xcworkspace -list
+
+      - name: Build iOS
+        run: |
+          xcodebuild \
+            -workspace ios/Karins.xcworkspace \
+            -scheme karins \
+            -configuration Debug \
+            -destination 'generic/platform=iOS' \
+            clean build
