@@ -12,6 +12,7 @@ jobs:
 
     env:
       KEYCHAIN_PASSWORD: github
+      TEAM_ID: 769D8U522H
 
     steps:
       - name: Checkout source
@@ -29,12 +30,8 @@ jobs:
       - name: Install CocoaPods
         run: |
           cd ios
+          pod repo update
           pod install
-
-      - name: Show available schemes
-        run: |
-          cd ios
-          xcodebuild -workspace Karins.xcworkspace -list
 
       - name: Install Distribution Certificate
         env:
@@ -68,15 +65,49 @@ jobs:
           echo "$BUILD_PROVISION_PROFILE_BASE64" | base64 --decode > profile.mobileprovision
 
           UUID=$(/usr/libexec/PlistBuddy -c "Print UUID" /dev/stdin <<< "$(security cms -D -i profile.mobileprovision)")
-
           cp profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/$UUID.mobileprovision
 
-      - name: Build iOS
+      - name: Archive App
         run: |
-          xcodebuild \
+          mkdir -p build
+
+          xcodebuild archive \
             -workspace ios/Karins.xcworkspace \
             -scheme karins \
-            -configuration Debug \
-            -destination 'generic/platform=iOS' \
-            -allowProvisioningUpdates \
-            clean build
+            -configuration Release \
+            -archivePath build/karins.xcarchive \
+            -destination "generic/platform=iOS" \
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM=$TEAM_ID \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
+            clean archive
+
+      - name: Create ExportOptions.plist
+        run: |
+          cat > ExportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>teamID</key>
+            <string>769D8U522H</string>
+          </dict>
+          </plist>
+          EOF
+
+      - name: Export IPA
+        run: |
+          xcodebuild -exportArchive \
+            -archivePath build/karins.xcarchive \
+            -exportOptionsPlist ExportOptions.plist \
+            -exportPath build
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: karins-ipa
+          path: build/*.ipa
