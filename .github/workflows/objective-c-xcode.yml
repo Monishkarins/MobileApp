@@ -59,6 +59,18 @@ jobs:
             -k "$KEYCHAIN_PASSWORD" \
             build.keychain
 
+      - name: Install Provisioning Profile
+        env:
+          BUILD_PROVISION_PROFILE_BASE64: ${{ secrets.BUILD_PROVISION_PROFILE_BASE64 }}
+        run: |
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+
+          echo "$BUILD_PROVISION_PROFILE_BASE64" | base64 --decode > profile.mobileprovision
+
+          UUID=$(/usr/libexec/PlistBuddy -c "Print UUID" /dev/stdin <<< "$(security cms -D -i profile.mobileprovision)")
+
+          cp profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/$UUID.mobileprovision
+
       - name: Build iOS
         run: |
           xcodebuild \
@@ -66,4 +78,5 @@ jobs:
             -scheme karins \
             -configuration Debug \
             -destination 'generic/platform=iOS' \
+            -allowProvisioningUpdates \
             clean build
