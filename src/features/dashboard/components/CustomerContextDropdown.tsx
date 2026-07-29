@@ -106,9 +106,11 @@ export default function CustomerContextDropdown({
       if (notifyParent && !alreadySelected) onContextChangeRef.current?.();
       return true;
     } catch (err: any) {
+      const status = err?.status != null ? String(err.status) : '';
+      const message = err?.message ?? 'Request failed';
       Alert.alert(
         'Could not switch customer',
-        `${err?.status ?? ''} ${err?.message ?? 'Request failed'}`.trim(),
+        [status, message].filter(Boolean).join(' ').trim(),
       );
       return false;
     } finally {

@@ -92,9 +92,11 @@ export default function CustomerGroupAdminGate() {
         label,
       });
     } catch (err: any) {
+      const status = err?.status != null ? String(err.status) : '';
+      const message = err?.message ?? 'Request failed';
       Alert.alert(
         'Could not select customer',
-        `${err?.status ?? ''} ${err?.message ?? 'Request failed'}`.trim(),
+        [status, message].filter(Boolean).join(' ').trim(),
       );
     } finally {
       setSubmitting(false);

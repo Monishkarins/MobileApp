@@ -9,9 +9,10 @@ import type {
 export const authApi = {
   // Shared web auth route — no dedicated /auth/mobile/signIn exists on the
   // backend, so reuse /auth/signIn (extra device fields are simply ignored).
-  // Access token comes from the response body (Bearer); cookies are not required.
+  // Access token comes from the response body, and the backend also sets the
+  // refresh cookie used later by /auth/refreshToken after customer switching.
   signIn: (payload: LoginPayload) =>
-    apiClient.post<LoginResponse>('/auth/signIn', payload),
+    apiClient.post<LoginResponse>('/auth/signIn', payload, { withCredentials: true }),
 
   /** Refresh access token using HTTP-only cookie */
   refresh: () =>
@@ -49,9 +50,12 @@ export const authApi = {
   revokeDevice: (deviceId: string) =>
     apiClient.post('/auth/mobile/revoke-device', { deviceId }),
 
-  /** Refresh session after customer switch — send current token, get scoped token back. */
-  refreshToken: (accessToken: string) =>
-    apiClient.post<RefreshTokenResponse>('/auth/refreshToken', { accessToken }),
+  /**
+   * Refresh session after customer switch. The backend reads the HTTP-only
+   * refresh cookie; request body is intentionally empty.
+   */
+  refreshToken: () =>
+    apiClient.post<RefreshTokenResponse>('/auth/refreshToken', {}, { withCredentials: true }),
 
   /** Point the server at the chosen customer before calling refreshToken. */
   setDefaultCustomer: (selectedCustomerId: number) =>
@@ -59,7 +63,7 @@ export const authApi = {
 
   /** Sign in with account PIN (mobile quick login). */
   pinSignIn: (payload: PinSignInPayload) =>
-    apiClient.post<LoginResponse>('/auth/pin/signIn', payload),
+    apiClient.post<LoginResponse>('/auth/pin/signIn', payload, { withCredentials: true }),
 
   /** Check whether the account has a PIN configured. */
   pinStatus: (mobileNumber: string) =>

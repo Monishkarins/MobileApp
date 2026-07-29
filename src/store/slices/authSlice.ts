@@ -9,7 +9,11 @@ import { authApi } from '../../services/api/authApi';
 import { invalidateApiSession, markApiSessionActive, getApiErrorMessage } from '../../services/api/client';
 import { SecureStorage, Cache } from '../../services/storage/SecureStorage';
 import type { AuthUser, DashboardContext, LoginPayload, RefreshTokenResponse } from '../../types/auth';
-import { isCustomerGroupAdmin, isMobileAppLoginBlocked, requiresContextSelection } from '../../types/auth';
+import {
+  isCustomerGroupAdmin,
+  isMobileAppLoginBlocked,
+  requiresAdminContextPicker,
+} from '../../types/auth';
 import { switchActiveCustomer } from '../../services/auth/customerSwitch';
 import { signInWithPinLogin, syncPinLoginPreference, enablePinLogin } from '../../services/auth/pinAuthService';
 import { registerPushDevice } from '../../services/notifications/registerPushDevice';
@@ -247,9 +251,10 @@ export const syncDefaultCustomerSession = createAsyncThunk<
   async (_, { getState }) => {
     const { dashboardContext, user } = getState().auth;
 
-    // Default CUSTOMER tokens from /auth/signIn are already scoped — only admin-style
-    // roles need the set-default + refreshToken dance (was wiping sessions on APK).
-    if (!user?.roleKey || !requiresContextSelection(user.roleKey)) {
+    // CUSTOMER_GROUP_ADMIN uses its own associated-customer switch flow after the
+    // app shell loads. Forcing the admin-style refresh here can invalidate the
+    // fresh login before that picker has chosen the correct scoped customer.
+    if (!user?.roleKey || !requiresAdminContextPicker(user.roleKey)) {
       return null;
     }
 

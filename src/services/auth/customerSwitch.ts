@@ -1,79 +1,93 @@
 /**
- * Customer-group-admin switch flow — mirrors the web app:
+ * Customer-group-admin switch flow — mirrors the web header:
  * 1) PUT /user/set-default-user-id  { selectedCustomerId }
- * 2) POST /auth/refreshToken       { accessToken }
+ * 2) Update the local session so the UI scopes to that customer
  *
- * The refresh response carries the customer-scoped token + defaultCustomerId
- * that toll/vehicle/claims endpoints actually honour.
+ * Backend APIs re-read `defaultCustomerId` from the User row on every request
+ * (JWT only carries userId), so a fresh access token is not required for the
+ * switch to take effect. Web achieves the same via page reload.
  *
- * Live DB often lags the set-default write; an immediate refreshToken then
- * returns 500. We retry refresh briefly so the first UI attempt succeeds.
+ * `/auth/refreshToken` is cookie-only and unreliable on React Native, so it is
+ * attempted as a best-effort UI sync and never blocks a successful set-default.
  */
 
 import { authApi } from '../api/authApi';
-import type { ApiError } from '../api/client';
 import { SecureStorage } from '../storage/SecureStorage';
-import type { RefreshTokenResponse } from '../../types/auth';
+import type { RefreshTokenResponse, RoleKey } from '../../types/auth';
 
-/** How many times to re-call refresh after set-default before surfacing failure. */
-const REFRESH_MAX_ATTEMPTS = 3;
-
-/** Base delay (ms); grows per attempt so the primary write can become readable. */
-const REFRESH_RETRY_BASE_DELAY_MS = 400;
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/**
- * Treat 5xx / network failures as retryable — those match the race we see on
- * the first switch. Auth/validation errors (4xx) must fail immediately.
- */
-function isRetryableSwitchError(error: unknown): boolean {
-  const status = (error as ApiError)?.status;
-  if (typeof status !== 'number') return true;
-  return status === 0 || status >= 500;
-}
+type SessionUserSnapshot = {
+  userId: number;
+  roleId: number;
+  roleKey: RoleKey;
+  mobileVerified: boolean;
+  customerName: string;
+  defaultCustomerId: number | null;
+  eligibleForCommissionReport: boolean;
+};
 
 /**
- * Issues a scoped session after set-default. Retries only the refresh step
- * because the customer id is already persisted on the first successful write.
+ * Build a client-side session payload when cookie refresh is unavailable —
+ * same shape as /auth/refreshToken so Redux applyRefreshedSession stays happy.
  */
-async function refreshScopedSession(
+function buildLocalScopedSession(
+  sessionUser: SessionUserSnapshot,
+  selectedCustomerId: number,
   accessToken: string,
-): Promise<RefreshTokenResponse> {
-  let lastError: unknown;
+): RefreshTokenResponse {
+  return {
+    accessToken,
+    userId: sessionUser.userId,
+    roleId: sessionUser.roleId,
+    roleKey: sessionUser.roleKey,
+    mobileVerified: sessionUser.mobileVerified,
+    // Keep the signed-in account name; callers label the picker with the
+    // selected customer's display name separately.
+    customerName: sessionUser.customerName,
+    defaultCustomerId: selectedCustomerId,
+    eligibleForCommissionReport: sessionUser.eligibleForCommissionReport,
+  };
+}
 
-  for (let attempt = 1; attempt <= REFRESH_MAX_ATTEMPTS; attempt += 1) {
-    try {
-      const { data } = await authApi.refreshToken(accessToken);
-      return data;
-    } catch (error) {
-      lastError = error;
-      // Exhausted retries or a non-transient error — bubble up to the UI.
-      if (!isRetryableSwitchError(error) || attempt === REFRESH_MAX_ATTEMPTS) {
-        throw error;
-      }
-      // Back off so the set-default commit is visible before the next refresh.
-      await delay(REFRESH_RETRY_BASE_DELAY_MS * attempt);
+/**
+ * Optional cookie refresh after set-default. Returns null when the HTTP-only
+ * refresh cookie is missing (common on mobile) so the local session path runs.
+ */
+async function tryCookieRefreshSession(): Promise<RefreshTokenResponse | null> {
+  try {
+    const { data } = await authApi.refreshToken();
+    if (!data?.accessToken || data.accessToken.split('.').length !== 3) {
+      return null;
     }
+    return data;
+  } catch {
+    return null;
   }
-
-  throw lastError;
 }
 
 export async function switchActiveCustomer(
   selectedCustomerId: number,
 ): Promise<RefreshTokenResponse> {
-  // Persist the chosen customer first — refreshToken reads this server-side.
-  await authApi.setDefaultCustomer(selectedCustomerId);
-
   const accessToken = await SecureStorage.getAccessToken();
   if (!accessToken) {
     throw new Error('Session expired. Please sign in again.');
   }
 
-  const data = await refreshScopedSession(accessToken);
+  const sessionUser = SecureStorage.getSessionUser<SessionUserSnapshot>();
+  if (!sessionUser?.userId) {
+    throw new Error('Session expired. Please sign in again.');
+  }
+
+  // Persist the chosen customer first — subsequent APIs read this from the DB.
+  await authApi.setDefaultCustomer(selectedCustomerId);
+
+  // Prefer a server refresh when cookies work (web parity); otherwise keep the
+  // current Bearer token and update local defaultCustomerId for the UI.
+  const refreshed = await tryCookieRefreshSession();
+  const data = refreshed ?? buildLocalScopedSession(
+    sessionUser,
+    selectedCustomerId,
+    accessToken,
+  );
 
   if (data.accessToken) {
     await SecureStorage.setAccessToken(data.accessToken);
