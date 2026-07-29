@@ -13,6 +13,7 @@ jobs:
     env:
       KEYCHAIN_PASSWORD: github
       TEAM_ID: 769D8U522H
+      BUNDLE_ID: com.karins
 
     steps:
       - name: Checkout source
@@ -64,40 +65,58 @@ jobs:
 
           echo "$BUILD_PROVISION_PROFILE_BASE64" | base64 --decode > profile.mobileprovision
 
-          UUID=$(/usr/libexec/PlistBuddy -c "Print UUID" /dev/stdin <<< "$(security cms -D -i profile.mobileprovision)")
+          # Decode profile once so we can reuse UUID + name for manual signing.
+          security cms -D -i profile.mobileprovision > profile.plist
+          UUID=$(/usr/libexec/PlistBuddy -c "Print UUID" profile.plist)
+          PROFILE_NAME=$(/usr/libexec/PlistBuddy -c "Print Name" profile.plist)
+
           cp profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/$UUID.mobileprovision
+
+          # Persist for later archive/export steps in this job.
+          echo "PROVISIONING_PROFILE_SPECIFIER=$PROFILE_NAME" >> "$GITHUB_ENV"
+          echo "Installed profile: $PROFILE_NAME ($UUID)"
 
       - name: Archive App
         run: |
           mkdir -p build
 
+          # Workspace on disk is lowercase: ios/karins.xcworkspace
           xcodebuild archive \
-            -workspace ios/Karins.xcworkspace \
+            -workspace ios/karins.xcworkspace \
             -scheme karins \
             -configuration Release \
             -archivePath build/karins.xcarchive \
             -destination "generic/platform=iOS" \
             CODE_SIGN_STYLE=Manual \
-            DEVELOPMENT_TEAM=$TEAM_ID \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
             CODE_SIGN_IDENTITY="Apple Distribution" \
-            clean archive
+            PROVISIONING_PROFILE_SPECIFIER="$PROVISIONING_PROFILE_SPECIFIER"
 
       - name: Create ExportOptions.plist
         run: |
+          # Manual App Store export requires an explicit bundle-id → profile map.
           cat > ExportOptions.plist <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
           <dict>
-            <key>method</key>
-            <string>app-store</string>
-            <key>signingStyle</key>
-            <string>manual</string>
-            <key>teamID</key>
-            <string>769D8U522H</string>
+          	<key>method</key>
+          	<string>app-store</string>
+          	<key>signingStyle</key>
+          	<string>manual</string>
+          	<key>teamID</key>
+          	<string>${TEAM_ID}</string>
+          	<key>provisioningProfiles</key>
+          	<dict>
+          		<key>${BUNDLE_ID}</key>
+          		<string>${PROVISIONING_PROFILE_SPECIFIER}</string>
+          	</dict>
           </dict>
           </plist>
           EOF
+          # Strip leading indent from the heredoc so plutil accepts the file.
+          sed -i '' 's/^[[:space:]]*//' ExportOptions.plist
+          plutil -lint ExportOptions.plist
 
       - name: Export IPA
         run: |
