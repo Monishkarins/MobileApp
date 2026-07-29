@@ -146,7 +146,9 @@ export default function DLDetailScreen({ route }: any) {
                 <View key={`${vehicle.vecatg}-${idx}`} style={styles.tableRow}>
                   <Text style={styles.tableCell}>{vehicle.vecatg || '—'}</Text>
                   <Text style={styles.tableCell}>{vehicle.covdesc || '—'}</Text>
-                  <Text style={styles.tableCell}>{fmtDate(vehicle.covIssuedt)}</Text>
+                  <Text style={styles.tableCell}>
+                    {fmtDate(vehicle.dcIssuedt || vehicle.covIssuedt)}
+                  </Text>
                 </View>
               ))}
             </GlassCard>

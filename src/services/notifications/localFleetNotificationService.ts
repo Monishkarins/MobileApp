@@ -32,8 +32,8 @@ function isOnCooldown(id: string, body: string): boolean {
 export async function showDerivedFleetPush(notification: FleetNotification): Promise<void> {
   if (!isCategoryAlertsEnabled(notification.category)) return;
 
-  // Always refresh the tray row (MessagingStyle / full body). Cooldown only
-  // suppresses sound/heads-up so dashboard polling does not keep buzzing.
+  // Always refresh the tray row (short body + Inbox/BigText detail). Cooldown
+  // only suppresses sound/heads-up so dashboard polling does not keep buzzing.
   const onCooldown = isOnCooldown(notification.id, notification.body);
   const shown = await pushService.displayLocalNotification(notification, {
     onlyAlertOnce: onCooldown,

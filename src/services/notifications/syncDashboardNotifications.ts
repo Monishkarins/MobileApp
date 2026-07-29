@@ -1,6 +1,10 @@
 /**
  * Derives fleet alerts from the dashboard summary (due / finished work) and
  * mirrors them into the local notification inbox — same rules as the web portal.
+ *
+ * Each alert sets a short `body` for the collapsed OS banner and a multi-line
+ * `detail` for the expanded shade (Inbox / BigText). Putting the full metrics
+ * only in `body` made some OEMs show just the last line (e.g. "Expired: 16").
  */
 
 import type { Announcement, ComplianceSummary, DashboardSummary } from '../../types/dashboard';
@@ -79,21 +83,24 @@ export function deriveDashboardNotifications(
   const walletThreshold = walletAlert.alertThreshold;
 
   if (walletAlert.isLow && isCategoryAlertsEnabled('low_wallet')) {
-    // Multi-line body so Android Inbox style can show each fact on its own row.
-    const walletBody = walletAlert.isEmpty
+    const walletDetail = walletAlert.isEmpty
       ? 'FASTag wallet is empty.\nRecharge immediately to avoid toll failures.'
       : [
           `Balance: ${formatINR(walletAlert.totalBalance)}`,
           `Alert limit: ${formatINR(walletThreshold)}`,
           'Recharge to avoid toll failures.',
         ].join('\n');
+    // Collapsed banner stays one line; expand shows balance / limit detail.
+    const walletBody = walletAlert.isEmpty
+      ? 'FASTag wallet is empty — recharge now'
+      : `Balance ${formatINR(walletAlert.totalBalance)} · limit ${formatINR(walletThreshold)}`;
 
     out.push({
       id: 'dash-wallet',
       category: 'low_wallet',
       title: walletAlert.isEmpty ? 'FASTag wallet empty' : 'Wallet low',
       body: walletBody,
-      detail: walletBody,
+      detail: walletDetail,
       createdAt: now,
       read: false,
     });
@@ -106,14 +113,13 @@ export function deriveDashboardNotifications(
     (expiredCompliance > 0 || expiringCompliance > 0)
     && isCategoryAlertsEnabled('rc_expiry')
   ) {
-    // One doc per line — Inbox style shows Fitness / Insurance / … without "…".
-    const complianceBody = formatComplianceStatusCounts(summary.compliance);
+    const complianceDetail = formatComplianceStatusCounts(summary.compliance);
     out.push({
       id: 'dash-compliance',
       category: 'rc_expiry',
       title: 'Vahan Compliance',
-      body: complianceBody,
-      detail: complianceBody,
+      body: `Expired ${expiredCompliance} · Expiring ${expiringCompliance}`,
+      detail: complianceDetail,
       createdAt: now,
       read: false,
       data: { screen: 'RCList' },
@@ -122,16 +128,16 @@ export function deriveDashboardNotifications(
 
   const pendingChallans = summary.challans?.pendingCount ?? 0;
   if (pendingChallans > 0 && isCategoryAlertsEnabled('echallan')) {
-    const challanBody = [
-      `Pending Challans: ${pendingChallans}`,
-      `Due Amount: ${formatINR(summary.challans.pendingAmount)}`,
-    ].join('\n');
+    const dueAmount = formatINR(summary.challans.pendingAmount);
     out.push({
       id: 'dash-challans',
       category: 'echallan',
       title: 'E-challan',
-      body: challanBody,
-      detail: challanBody,
+      body: `${pendingChallans} pending · ${dueAmount}`,
+      detail: [
+        `Pending Challans: ${pendingChallans}`,
+        `Due Amount: ${dueAmount}`,
+      ].join('\n'),
       createdAt: now,
       read: false,
       data: { screen: 'ChallanList' },
@@ -140,19 +146,23 @@ export function deriveDashboardNotifications(
 
   const driverAlertCount = getDriverOpenAlertCount(summary.drivers);
   if (driverAlertCount > 0 && isCategoryAlertsEnabled('dl_expiry')) {
-    // Separate lines so Suspended / Expiring / Expired are not cut mid-word.
-    const driverBody = [
+    const suspended = summary.drivers.suspended ?? 0;
+    const expiring = summary.drivers.expiringSoon ?? 0;
+    const expired = summary.drivers.expired ?? 0;
+    // Short collapsed summary — avoids OEM trays showing only "Expired: N".
+    const driverBody = `${driverAlertCount} need attention · ${expired} expired`;
+    const driverDetail = [
       `${driverAlertCount} need attention`,
-      `Suspended: ${summary.drivers.suspended}`,
-      `Expiring: ${summary.drivers.expiringSoon}`,
-      `Expired: ${summary.drivers.expired}`,
+      `Suspended: ${suspended}`,
+      `Expiring: ${expiring}`,
+      `Expired: ${expired}`,
     ].join('\n');
     out.push({
       id: 'dash-drivers',
       category: 'dl_expiry',
       title: 'Driver License',
       body: driverBody,
-      detail: driverBody,
+      detail: driverDetail,
       createdAt: now,
       read: false,
       data: { screen: 'DLList' },
@@ -161,16 +171,16 @@ export function deriveDashboardNotifications(
 
   const approvedClaims = summary.claims?.approved ?? 0;
   if (approvedClaims > 0 && isCategoryAlertsEnabled('claim_update')) {
-    const claimBody = [
-      `${approvedClaims} toll claim${approvedClaims > 1 ? 's' : ''} approved`,
-      `Recovered Amount: ${formatINR(summary.claims.recoveredFY)}`,
-    ].join('\n');
+    const recovered = formatINR(summary.claims.recoveredFY);
     out.push({
       id: 'dash-claims',
       category: 'claim_update',
       title: 'Claim',
-      body: claimBody,
-      detail: claimBody,
+      body: `${approvedClaims} claim${approvedClaims > 1 ? 's' : ''} approved · ${recovered}`,
+      detail: [
+        `${approvedClaims} toll claim${approvedClaims > 1 ? 's' : ''} approved`,
+        `Recovered Amount: ${recovered}`,
+      ].join('\n'),
       createdAt: now,
       read: false,
       data: { screen: 'ClaimsList', initialFilter: 'APPROVED' },
@@ -182,6 +192,7 @@ export function deriveDashboardNotifications(
     .forEach((item) => {
       const announcementBody =
         item.message || (item.category ? `Update · ${item.category}` : 'Karins update');
+      // Keep announcement body as the collapsed line; detail mirrors for expand.
       out.push({
         id: `dash-announcement-${item.id}`,
         category: 'product_update',

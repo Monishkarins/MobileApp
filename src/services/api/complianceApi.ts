@@ -84,6 +84,32 @@ export const complianceApi = {
   searchDL: (dlNo: string) =>
     apiClient.get<any>('/driverLicense/search', { params: { dlNo } }),
 
+  /**
+   * ULIP Sarathi lookup — same body as web Check Status
+   * (POST /driverLicense/search-dl).
+   */
+  searchDLStatus: (payload: {
+    dlNumber: string;
+    dob: string;
+    mobileNo: string;
+    driverName: string;
+  }) =>
+    // Sarathi upstream is often slower than list APIs; keep room past client default.
+    apiClient.post<any>('/driverLicense/search-dl', payload, { timeout: 30_000 }),
+
+  /**
+   * Persist Sarathi result + operator-entered contact fields, then link to the
+   * signed-in customer (POST /driverLicense/create-driver).
+   */
+  createDriver: (payload: {
+    result: unknown;
+    mobileNo: string;
+    dob: string;
+    driverName: string;
+    custId?: number | string;
+  }) =>
+    apiClient.post<{ message?: string }>('/driverLicense/create-driver', payload),
+
   getComplianceSummary: (customerId?: number) =>
     apiClient.get<any>('/vehicleRc/compliance-summary', { params: { customerId } }),
 };

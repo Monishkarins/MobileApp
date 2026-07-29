@@ -1,6 +1,7 @@
 /**
  * SARATHI DL List — summary cards filter the ledger (web parity); tapping a row
- * opens the full licence detail view (web eye-icon modal).
+ * opens the full licence detail view (web eye-icon modal). Check Status / Add
+ * mirrors web privilege 213.
  */
 
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
@@ -12,6 +13,7 @@ import { useNavigation, useRoute, type RouteProp } from '@react-navigation/nativ
 import { complianceApi } from '../../../services/api/complianceApi';
 import { vehicleApi } from '../../../services/api/vehicleApi';
 import { useAppSelector } from '../../../store';
+import { useHasAccess } from '../../../hooks/useHasAccess';
 import {
   LiquidBackground, GlassCard, StatusPill,
   SkeletonCard, EmptyState, ScreenHeader,
@@ -19,8 +21,10 @@ import {
 import { Colors, FontSize, Spacing } from '../../../theme';
 import { fmtDate } from '../../../utils/format';
 import { requiresAdminContextPicker } from '../../../types/auth';
+import { PrivilegeIds } from '../../../types/accessMenus';
 import type { MoreStackParamList } from '../../../navigation/types';
 import DLFilterPanel from '../components/DLFilterPanel';
+import DLCheckStatusModal from '../components/DLCheckStatusModal';
 import {
   EMPTY_DL_FILTERS,
   type DLFilters,
@@ -169,6 +173,8 @@ export default function DLListScreen() {
   const { user, dashboardContext } = useAppSelector((s) => s.auth);
   const customerId = dashboardContext?.customerId ?? user?.defaultCustomerId;
   const canScopeByCustomerId = requiresAdminContextPicker(user?.roleKey);
+  // Same gate as web IdCard "Check DL Status" (DRIVER_LICENSE.CHECK_STATUS).
+  const canCheckDlStatus = useHasAccess(PrivilegeIds.DRIVER_LICENSE_CHECK_STATUS);
 
   const [draftFilters, setDraftFilters] = useState<DLFilters>(() => buildInitialFilters(route.params));
   const [appliedFilters, setAppliedFilters] = useState<DLFilters>(() => buildInitialFilters(route.params));
@@ -181,6 +187,7 @@ export default function DLListScreen() {
     || route.params?.licenseNo
     || route.params?.driverName,
   ));
+  const [showCheckStatus, setShowCheckStatus] = useState(false);
   const [items, setItems] = useState<DLItem[]>([]);
   const [total, setTotal] = useState(0);
   const [statusCounts, setStatusCounts] = useState<DLStatusCounts | null>(null);
@@ -393,16 +400,28 @@ export default function DLListScreen() {
         subtitle={total ? `${total} licences` : undefined}
         showBack
         rightElement={(
-          <TouchableOpacity
-            style={[styles.filterBtn, (showFilters || filtersActive) && styles.filterBtnActive]}
-            onPress={() => setShowFilters((open) => !open)}
-            activeOpacity={0.85}
-            accessibilityLabel="Toggle filters"
-          >
-            <Text style={[styles.filterBtnText, (showFilters || filtersActive) && styles.filterBtnTextActive]}>
-              Filters
-            </Text>
-          </TouchableOpacity>
+          <View style={styles.headerActions}>
+            {canCheckDlStatus ? (
+              <TouchableOpacity
+                style={styles.addBtn}
+                onPress={() => setShowCheckStatus(true)}
+                activeOpacity={0.85}
+                accessibilityLabel="Check DL Status"
+              >
+                <Text style={styles.addBtnText}>Add DL</Text>
+              </TouchableOpacity>
+            ) : null}
+            <TouchableOpacity
+              style={[styles.filterBtn, (showFilters || filtersActive) && styles.filterBtnActive]}
+              onPress={() => setShowFilters((open) => !open)}
+              activeOpacity={0.85}
+              accessibilityLabel="Toggle filters"
+            >
+              <Text style={[styles.filterBtnText, (showFilters || filtersActive) && styles.filterBtnTextActive]}>
+                Filters
+              </Text>
+            </TouchableOpacity>
+          </View>
         )}
       />
       {showFilters ? (
@@ -441,11 +460,29 @@ export default function DLListScreen() {
           showsVerticalScrollIndicator={false}
         />
       )}
+
+      <DLCheckStatusModal
+        visible={showCheckStatus}
+        onClose={() => setShowCheckStatus(false)}
+        onAdded={() => fetchData(appliedFilters, expiryFilter, true)}
+      />
     </LiquidBackground>
   );
 }
 
 const styles = StyleSheet.create({
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  addBtn: {
+    backgroundColor: Colors.blue,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  addBtnText: {
+    fontSize: FontSize.sm,
+    fontWeight: '700',
+    color: Colors.white,
+  },
   filterBtn: {
     backgroundColor: Colors.glass.bg,
     borderWidth: 1,

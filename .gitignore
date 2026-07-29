@@ -59,8 +59,6 @@ android/app/.cxx/
 ios/Pods/
 ios/build/
 ios/DerivedData/
-ios/*.xcworkspace
-!ios/*.xcworkspace/contents.xcworkspacedata
 ios/**/*.xcuserstate
 ios/**/xcuserdata/
 ios/.xcode.env.local

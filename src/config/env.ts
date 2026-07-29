@@ -25,7 +25,7 @@ export const ENABLE_MOCK_DATA: boolean = IS_DEV;
  */
 export const API_BASE_URL: string =
   (typeof process !== 'undefined' && process.env && process.env.KARINS_API_URL) ||
-  'https://api.karins.in/api';
+  'https://testapi.karins.in/api';
 
 /** Network request timeout (ms). */
 export const API_TIMEOUT_MS = 20000;
@@ -35,3 +35,7 @@ export const BLOCK_ON_ROOT: boolean =
   typeof process !== 'undefined' &&
   !!process.env &&
   process.env.KARINS_BLOCK_ON_ROOT === 'true';
+
+
+  //https://testapi.karins.in/api
+  //https://api.karins.in/api

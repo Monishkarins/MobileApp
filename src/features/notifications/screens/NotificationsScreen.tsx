@@ -51,8 +51,8 @@ interface ComplianceBodyRow {
 }
 
 /**
- * RC expiry notifications are persisted as newline text so push + inbox stay in
- * sync; parse that text back into structured rows to color the risky counts.
+ * RC expiry notifications store multi-line doc counts in `detail` (tray expand /
+ * inbox card). Parse that text back into structured rows to color risky counts.
  */
 function parseComplianceBody(body: string): ComplianceBodyRow[] {
   return body
@@ -163,7 +163,9 @@ export default function NotificationsScreen() {
 
   const renderItem = ({ item }: { item: FleetNotification }) => {
     const action = resolveNotificationAction(item);
-    const complianceRows = item.category === 'rc_expiry' ? parseComplianceBody(item.body) : [];
+    // Prefer multi-line detail for inbox cards; body alone is the collapsed tray summary.
+    const displayText = item.detail?.trim() || item.body;
+    const complianceRows = item.category === 'rc_expiry' ? parseComplianceBody(displayText) : [];
 
     return (
       <TouchableOpacity activeOpacity={0.85} onPress={() => markRead(item.id)}>
@@ -193,7 +195,7 @@ export default function NotificationsScreen() {
             </View>
           ) : (
             // No numberOfLines — let long alert copy wrap onto the next line fully.
-            <Text style={styles.body}>{item.body}</Text>
+            <Text style={styles.body}>{displayText}</Text>
           )}
           <View style={styles.footerRow}>
             <Text style={styles.time}>{fmtDateTime(item.createdAt)}</Text>

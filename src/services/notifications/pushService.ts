@@ -3,6 +3,10 @@
  *
  * Requires `android/app/google-services.json` from the Firebase console
  * (package name: com.karins). Without it, push calls no-op safely.
+ *
+ * Tray layout: short `body` for the collapsed banner + Inbox/BigText for expand.
+ * MessagingStyle is intentionally avoided — many OEMs collapse it to the last
+ * chat line (e.g. only "Expired: 16") under the persona name "Karins Fleet".
  */
 
 import { Platform } from 'react-native';
@@ -39,10 +43,11 @@ export const NOTIFICATION_CATEGORIES: readonly string[] = [
 
 const ANDROID_CHANNEL_ID = 'karins_fleet_alerts_high';
 export const ANDROID_NOTIFICATION_SMALL_ICON = 'ic_stat_notification';
-// Android requires a monochrome small icon; use the launcher icon as the *large* icon
-// so the notification row shows the app branding.
+/** Launcher branding in the expanded row — status bar still uses the monochrome small icon. */
 const ANDROID_NOTIFICATION_LARGE_ICON = 'ic_launcher';
-/** Soft-wrap width for tray lines — keeps OEM rows from collapsing into "…". */
+/** Matches android/app/src/main/res/values/colors.xml notification_accent. */
+const ANDROID_NOTIFICATION_COLOR = '#16B7F3';
+/** Soft-wrap width for expanded Inbox/BigText lines. */
 const ANDROID_NOTIFICATION_WRAP_CHARS = 40;
 let openHandlersRegistered = false;
 let notifeeHandlersRegistered = false;
@@ -83,31 +88,38 @@ function wrapNotificationLines(text: string, maxChars = ANDROID_NOTIFICATION_WRA
 }
 
 /**
- * Multi-line fleet alerts use MessagingStyle — Android shows several message
- * rows in the shade without requiring the user to tap expand (Inbox/BigText
- * only reveal the full copy after expand, which is why users saw "...").
+ * Collapsed tray row uses Notifee's `body`; expanded shade uses Inbox (metric
+ * lists) or BigText (paragraphs). Avoid MessagingStyle — it renders as a chat
+ * conversation and OEMs often show only the last line under "Karins Fleet".
  */
-function buildAndroidTextStyle(text: string, title?: string) {
+function buildAndroidTextStyle(text: string) {
   const lines = wrapNotificationLines(text);
-  const now = Date.now();
 
   if (lines.length > 1) {
-    const person = { name: 'Karins Fleet' };
     return {
-      type: AndroidStyle.MESSAGING as const,
-      person,
-      title: title || 'Karins Fleet',
-      messages: lines.map((line, index) => ({
-        text: line,
-        timestamp: now + index,
-        person,
-      })),
+      type: AndroidStyle.INBOX as const,
+      lines,
     };
   }
 
   return {
     type: AndroidStyle.BIGTEXT as const,
     text: lines[0] ?? text,
+  };
+}
+
+/** Shared Android tray chrome so local + FCM alerts look the same across OEMs. */
+function buildAndroidDisplayOptions(fullText: string, options?: { onlyAlertOnce?: boolean }) {
+  return {
+    channelId: ANDROID_CHANNEL_ID,
+    pressAction: { id: 'default' as const },
+    smallIcon: ANDROID_NOTIFICATION_SMALL_ICON,
+    largeIcon: ANDROID_NOTIFICATION_LARGE_ICON,
+    color: ANDROID_NOTIFICATION_COLOR,
+    importance: AndroidImportance.HIGH,
+    sound: 'default',
+    onlyAlertOnce: options?.onlyAlertOnce ?? false,
+    style: buildAndroidTextStyle(fullText),
   };
 }
 
@@ -223,29 +235,19 @@ export const pushService = {
       }
       if (!canShow) return false;
 
-      // Full message goes in body; MessagingStyle shows each line in the shade
-      // without requiring the user to tap the expand chevron.
+      // Collapsed banner = short body; expanded shade = detail (or body fallback).
+      const summaryBody = notification.body;
       const fullText = notification.detail ?? notification.body;
       await notifee.displayNotification({
         id: notification.id,
         title: notification.title,
-        body: fullText,
+        body: summaryBody,
         data: {
           category: notification.category,
           createdAt: notification.createdAt,
           ...(notification.data ?? {}),
         },
-        android: {
-          channelId: ANDROID_CHANNEL_ID,
-          pressAction: { id: 'default' },
-          smallIcon: ANDROID_NOTIFICATION_SMALL_ICON,
-          largeIcon: ANDROID_NOTIFICATION_LARGE_ICON,
-          importance: AndroidImportance.HIGH,
-          sound: 'default',
-          // Re-sync updates the tray row quietly so MessagingStyle replaces old "...".
-          onlyAlertOnce: options?.onlyAlertOnce ?? false,
-          style: buildAndroidTextStyle(fullText, notification.title),
-        },
+        android: buildAndroidDisplayOptions(fullText, options),
         ios: {
           foregroundPresentationOptions: {
             alert: true,
@@ -357,6 +359,7 @@ export const pushService = {
       // Ensure channel exists even if this path runs before sessionReady / Notifee bootstrap.
       await pushService.ensureAndroidChannel();
 
+      const fullText = mapped.detail ?? mapped.body;
       await notifee.displayNotification({
         id: mapped.id,
         title: mapped.title,
@@ -366,16 +369,7 @@ export const pushService = {
           category: mapped.category,
           createdAt: mapped.createdAt,
         },
-        android: {
-          channelId: ANDROID_CHANNEL_ID,
-          pressAction: { id: 'default' },
-          smallIcon: ANDROID_NOTIFICATION_SMALL_ICON,
-          largeIcon: ANDROID_NOTIFICATION_LARGE_ICON,
-          importance: AndroidImportance.HIGH,
-          sound: 'default',
-          // MessagingStyle shows multi-line FCM copy without requiring expand.
-          style: buildAndroidTextStyle(mapped.body, mapped.title),
-        },
+        android: buildAndroidDisplayOptions(fullText),
       });
     } catch {
       /* display is best-effort */

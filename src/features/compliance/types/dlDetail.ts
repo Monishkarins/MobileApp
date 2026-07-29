@@ -34,6 +34,8 @@ export interface DLDetailPayload {
   authorizedVehicles?: Array<{
     vecatg?: string;
     covdesc?: string;
+    /** Sarathi field used by web PDF / COV table */
+    dcIssuedt?: string;
     covIssuedt?: string;
   }>;
 }
