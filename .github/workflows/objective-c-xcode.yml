@@ -14,7 +14,7 @@ jobs:
       TEAM_ID: 769D8U522H
       BUNDLE_ID: com.karins
       # Temporary runner keychain only — not an Apple secret. Keep non-empty.
-      KEYCHAIN_PASSWORD: github-actions-keychain
+      KEYCHAIN_PASSWORD: Karins@54321
 
     steps:
       - name: Checkout source
