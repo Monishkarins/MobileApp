@@ -34,6 +34,15 @@ jobs:
           pod repo update
           pod install
 
+      # Battle-tested import — avoids brittle openssl extract/repack on runners.
+      - name: Import Apple signing certificate
+        uses: apple-actions/import-codesign-certs@v3
+        with:
+          p12-file-base64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+          p12-password: ${{ secrets.P12_PASSWORD }}
+
+      - name: Install provisioning profile and resolve identity
+        env:
       - name: Import signing assets
         env:
           BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
@@ -42,6 +51,8 @@ jobs:
         run: |
           set -euo pipefail
 
+          if [ -z "${BUILD_PROVISION_PROFILE_BASE64:-}" ]; then
+            echo "::error::BUILD_PROVISION_PROFILE_BASE64 secret is missing"
           if [ -z "${BUILD_CERTIFICATE_BASE64:-}" ] || [ -z "${P12_PASSWORD:-}" ] || [ -z "${BUILD_PROVISION_PROFILE_BASE64:-}" ]; then
             echo "::error::One or more signing secrets are empty"
             exit 1
@@ -106,12 +117,16 @@ jobs:
             | sed -E 's/.*"(.+)"/\1/')
 
           if [ -z "$IDENTITY" ]; then
-            echo "::error::No valid Distribution identity. The .p12 is not an Apple Distribution codesigning cert+key for team $TEAM_ID."
+            echo "::error::No valid Distribution identity after import-codesign-certs."
+            echo "Export a fresh Apple Distribution .p12 from Keychain (with private key) and update BUILD_CERTIFICATE_BASE64 / P12_PASSWORD."
             exit 1
           fi
 
           echo "CODE_SIGN_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
           echo "Using identity: $IDENTITY"
+
+          PP_PATH=$RUNNER_TEMP/build_pp.mobileprovision
+          echo -n "$BUILD_PROVISION_PROFILE_BASE64" | base64 --decode -o "$PP_PATH"
 
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
           security cms -D -i "$PP_PATH" > "$RUNNER_TEMP/profile.plist"
