@@ -1,0 +1,45 @@
+diff --git a/node_modules/@react-native/community-cli-plugin/dist/commands/start/OpenDebuggerKeyboardHandler.js b/node_modules/@react-native/community-cli-plugin/dist/commands/start/OpenDebuggerKeyboardHandler.js
+index 2a066a6..d6b17cd 100644
+--- a/node_modules/@react-native/community-cli-plugin/dist/commands/start/OpenDebuggerKeyboardHandler.js
++++ b/node_modules/@react-native/community-cli-plugin/dist/commands/start/OpenDebuggerKeyboardHandler.js
+@@ -78,7 +78,7 @@ class OpenDebuggerKeyboardHandler {
+               const descriptionSuffix = hasDuplicateTitles
+                 ? ` (${description})`
+                 : "";
+-              return `${(0, _util.styleText)(["white", "inverse"], ` ${i + 1} `)} - "${title}${descriptionSuffix}"`;
++              return `${(0, _util.styleText)("white", (0, _util.styleText)("inverse", ` ${i + 1} `))} - "${title}${descriptionSuffix}"`;
+             })
+             .join("\n  ")}`,
+         );
+diff --git a/node_modules/@react-native/community-cli-plugin/dist/commands/start/attachKeyHandlers.js b/node_modules/@react-native/community-cli-plugin/dist/commands/start/attachKeyHandlers.js
+index e99086b..177c59e 100644
+--- a/node_modules/@react-native/community-cli-plugin/dist/commands/start/attachKeyHandlers.js
++++ b/node_modules/@react-native/community-cli-plugin/dist/commands/start/attachKeyHandlers.js
+@@ -88,9 +88,9 @@ function attachKeyHandlers({ devServerUrl, messageSocket, reporter }) {
+     level: "info",
+     data: `Key commands available:
+ 
+-  ${(0, _util.styleText)(["bold", "inverse"], " r ")} - reload app(s)
+-  ${(0, _util.styleText)(["bold", "inverse"], " d ")} - open Dev Menu
+-  ${(0, _util.styleText)(["bold", "inverse"], " j ")} - open DevTools
++  ${(0, _util.styleText)("bold", (0, _util.styleText)("inverse", " r "))} - reload app(s)
++  ${(0, _util.styleText)("bold", (0, _util.styleText)("inverse", " d "))} - open Dev Menu
++  ${(0, _util.styleText)("bold", (0, _util.styleText)("inverse", " j "))} - open DevTools
+ `,
+   });
+ }
+diff --git a/node_modules/@react-native/community-cli-plugin/dist/utils/version.js b/node_modules/@react-native/community-cli-plugin/dist/utils/version.js
+index 1719e78..b575e9d 100644
+--- a/node_modules/@react-native/community-cli-plugin/dist/utils/version.js
++++ b/node_modules/@react-native/community-cli-plugin/dist/utils/version.js
+@@ -34,8 +34,8 @@ async function logIfUpdateAvailable(cliConfig, reporter) {
+       type: "unstable_server_log",
+       level: "info",
+       data: `React Native v${newVersion.stable} is now available (your project is running on v${currentVersion}).
+-Changelog: ${(0, _util.styleText)(["dim", "underline"], newVersion?.changelogUrl ?? "none")}
+-Diff: ${(0, _util.styleText)(["dim", "underline"], newVersion?.diffUrl ?? "none")}
++Changelog: ${(0, _util.styleText)("dim", (0, _util.styleText)("underline", newVersion?.changelogUrl ?? "none"))}
++Diff: ${(0, _util.styleText)("dim", (0, _util.styleText)("underline", newVersion?.diffUrl ?? "none"))}
+ `,
+     });
+   }

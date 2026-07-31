@@ -1,0 +1,129 @@
+diff --git a/node_modules/metro/src/index.flow.js b/node_modules/metro/src/index.flow.js
+index d85ac1c..6ef86a9 100644
+--- a/node_modules/metro/src/index.flow.js
++++ b/node_modules/metro/src/index.flow.js
+@@ -201,7 +201,14 @@ const runServer = async (
+   await earlyPortCheck(host, config.server.port);
+   if (secure != null || secureCert != null || secureKey != null) {
+     console.warn(
+-      _util.default.styleText(["inverse", "yellow", "bold"], " DEPRECATED "),
++      // Node <22 rejects array formats; nest single-style calls instead.
++      _util.default.styleText(
++        "inverse",
++        _util.default.styleText(
++          "yellow",
++          _util.default.styleText("bold", " DEPRECATED "),
++        ),
++      ),
+       "The `secure`, `secureCert`, and `secureKey` options are now deprecated. " +
+         "Please use the `secureServerOptions` object instead to pass options to " +
+         "Metro's https development server, or `config.server.tls` in Metro's configuration",
+diff --git a/node_modules/metro/src/lib/TerminalReporter.js b/node_modules/metro/src/lib/TerminalReporter.js
+index 292a8ee..4c9ce07 100644
+--- a/node_modules/metro/src/lib/TerminalReporter.js
++++ b/node_modules/metro/src/lib/TerminalReporter.js
+@@ -41,7 +41,16 @@ function _interopRequireWildcard(e, t) {
+ function _interopRequireDefault(e) {
+   return e && e.__esModule ? e : { default: e };
+ }
+-const style = (format, text) => _util.default.styleText(format, text);
++// Node <22 rejects array formats in util.styleText; apply styles one-by-one.
++const style = (format, text) => {
++  if (Array.isArray(format)) {
++    return format.reduceRight(
++      (acc, item) => _util.default.styleText(item, acc),
++      text,
++    );
++  }
++  return _util.default.styleText(format, text);
++};
+ const DARK_BLOCK_CHAR = "\u2593";
+ const LIGHT_BLOCK_CHAR = "\u2591";
+ const MAX_PROGRESS_BAR_CHAR_WIDTH = 16;
+diff --git a/node_modules/metro/src/lib/logToConsole.js b/node_modules/metro/src/lib/logToConsole.js
+index c38e00f..fd6ff29 100644
+--- a/node_modules/metro/src/lib/logToConsole.js
++++ b/node_modules/metro/src/lib/logToConsole.js
+@@ -8,6 +8,16 @@ var _util = _interopRequireDefault(require("util"));
+ function _interopRequireDefault(e) {
+   return e && e.__esModule ? e : { default: e };
+ }
++// Node <22 rejects array formats in util.styleText; apply styles one-by-one.
++function styleText(formats, text) {
++  if (Array.isArray(formats)) {
++    return formats.reduceRight(
++      (acc, format) => _util.default.styleText(format, acc),
++      text,
++    );
++  }
++  return _util.default.styleText(formats, text);
++}
+ const groupStack = [];
+ let collapsedGuardTimer;
+ var _default = (terminal, level, ...data) => {
+@@ -26,7 +36,7 @@ var _default = (terminal, level, ...data) => {
+     collapsedGuardTimer = setTimeout(() => {
+       if (groupStack.includes("groupCollapsed")) {
+         terminal.log(
+-          _util.default.styleText(["inverse", "yellow", "bold"], " WARN "),
++          styleText(["inverse", "yellow", "bold"], " WARN "),
+           "Expected `console.groupEnd` to be called after `console.groupCollapsed`.",
+         );
+         groupStack.length = 0;
+@@ -46,10 +56,8 @@ var _default = (terminal, level, ...data) => {
+       data[data.length - 1] = lastItem.trimEnd();
+     }
+     terminal.log(
+-      _util.default.styleText(
+-        [...color, "bold"],
+-        ` ${logFunction.toUpperCase()} `,
+-      ) + "".padEnd(groupStack.length * 2, " "),
++      styleText([...color, "bold"], ` ${logFunction.toUpperCase()} `) +
++        "".padEnd(groupStack.length * 2, " "),
+       _util.default.format(...data),
+     );
+   }
+diff --git a/node_modules/metro/src/lib/reporting.js b/node_modules/metro/src/lib/reporting.js
+index 949395d..94f7c02 100644
+--- a/node_modules/metro/src/lib/reporting.js
++++ b/node_modules/metro/src/lib/reporting.js
+@@ -15,18 +15,28 @@ function _interopRequireDefault(e) {
+ const supportsColor = () =>
+   process.stdout instanceof _tty.default.WriteStream &&
+   process.stdout.hasColors();
++// Node <22 rejects array formats in util.styleText; apply styles one-by-one.
++function styleText(formats, text) {
++  if (Array.isArray(formats)) {
++    return formats.reduceRight(
++      (acc, format) => _util.default.styleText(format, acc),
++      text,
++    );
++  }
++  return _util.default.styleText(formats, text);
++}
+ function logWarning(terminal, format, ...args) {
+   const str = _util.default.format(format, ...args);
+   terminal.log(
+     "%s %s",
+-    _util.default.styleText(["yellow", "inverse", "bold"], " WARN "),
++    styleText(["yellow", "inverse", "bold"], " WARN "),
+     str,
+   );
+ }
+ function logError(terminal, format, ...args) {
+   terminal.log(
+     "%s %s",
+-    _util.default.styleText(["red", "inverse", "bold"], " ERROR "),
++    styleText(["red", "inverse", "bold"], " ERROR "),
+     _util.default.format(
+       supportsColor() ? format : _util.default.stripVTControlCharacters(format),
+       ...args,
+@@ -37,7 +47,7 @@ function logInfo(terminal, format, ...args) {
+   const str = _util.default.format(format, ...args);
+   terminal.log(
+     "%s %s",
+-    _util.default.styleText(["cyan", "inverse", "bold"], " INFO "),
++    styleText(["cyan", "inverse", "bold"], " INFO "),
+     str,
+   );
+ }
