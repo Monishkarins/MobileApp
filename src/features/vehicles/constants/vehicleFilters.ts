@@ -1,5 +1,6 @@
 /**
  * Fleet vehicle list filters — field names mirror web VehicleHeader query params.
+ * Backend owns filtering; mobile only forwards non-empty values on Search.
  */
 
 export interface VehicleFilters {

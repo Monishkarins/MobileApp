@@ -1,6 +1,7 @@
 /**
  * Fleet vehicle filters — mirrors web VehicleHeader (customer, agent, vehicle no,
- * class, tag ID, group, ON/OFF status, YAP vehicle status).
+ * class, tag ID, group, ON/OFF status, YAP vehicle status). Search submits the
+ * same query keys to the backend; no client-side rematch.
  */
 
 import React, { useMemo, useState } from 'react';

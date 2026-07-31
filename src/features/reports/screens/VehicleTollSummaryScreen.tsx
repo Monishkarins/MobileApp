@@ -178,7 +178,10 @@ export default function VehicleTollSummaryScreen() {
 
   const handleExport = async (format: 'excel' | 'pdf') => {
     if (format === 'pdf' && !appliedFilters.vehicleNo.trim()) {
-      Alert.alert('Vehicle required', 'Please apply Vehicle No filter to export PDF.');
+      Alert.alert(
+        'Vehicle required',
+        'Please select Vehicle No in filters and apply before exporting PDF.',
+      );
       return;
     }
 

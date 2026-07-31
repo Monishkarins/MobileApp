@@ -13,6 +13,9 @@ export interface VehicleStatusDisplay {
 
 const ON_STATUSES = new Set(['ALLOCATED', 'NETC_NOTEXCEPTION']);
 
+/** Statuses treated as switch ON — used by list cards and Status filter. */
+export const VEHICLE_STATUS_ON_VALUES = ['ALLOCATED', 'NETC_NOTEXCEPTION'] as const;
+
 /** Web Status column: switch ON only for allocated / not-exception vehicles. */
 export function isVehicleStatusOn(yapStatus?: string | null): boolean {
   return ON_STATUSES.has(normalizeYapStatus(yapStatus));

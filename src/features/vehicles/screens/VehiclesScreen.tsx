@@ -1,10 +1,10 @@
 /**
  * Fleet Vehicles list — status cards + filter panel scoped to the active customer.
- * Text filters (Vehicle No / Class / Tag ID) debounce and partial-match on the
- * loaded rows; dropdown filters (customer, group, status, agent) hit the API on Search.
+ * Filtering is backend-owned: Search / card taps only build the same query payload
+ * as web VehicleHeader + VehicleContainer (no client-side rematch).
  */
 
-import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   View, Text, FlatList, StyleSheet, TouchableOpacity,
   RefreshControl, ScrollView, Switch, Alert, ActivityIndicator,
@@ -26,7 +26,7 @@ import {
   VEHICLE_STATUS_CARDS,
   type VehicleStatusCard,
 } from '../constants/vehicleStatusCards';
-import { isVehicleStatusOn, normalizeYapStatus, resolveVehicleStatusDisplay } from '../utils/vehicleStatusUtils';
+import { isVehicleStatusOn, resolveVehicleStatusDisplay } from '../utils/vehicleStatusUtils';
 import { mapVehicleListRow, type VehicleListItem } from '../mapVehicleListRow';
 import VehicleFilterPanel from '../components/VehicleFilterPanel';
 import { canShowAgentFilter } from '../../toll/components/TagInventoryFilterPanel';
@@ -39,63 +39,47 @@ import {
   type VehicleGroupOption,
 } from '../constants/vehicleFilters';
 
-const TEXT_FILTER_DEBOUNCE_MS = 350;
-
+/**
+ * Build /vehicle/vehicle-list query params — same keys as web VehicleQueryProps.
+ *
+ * Backend priority (vehicleService): vehicleStatuses > vehicleStatus > status.
+ * Web Search clears card vehicleStatuses so form status filters apply; card click
+ * sets vehicleStatuses. customerId must be yapEntityId (never numeric PK).
+ */
 function buildVehicleQueryParams(
-  activeCardConfig: VehicleStatusCard,
+  cardConfig: VehicleStatusCard | null,
   filters: VehicleFilters,
   agentId: string,
-  dashboardCustomerId: number | undefined,
-  canScopeByCustomerId: boolean,
-  groupOptions: VehicleGroupOption[] = [],
-) {
-  // When a single YAP status is picked, it replaces the card CSV so the two
-  // filters do not AND-conflict and return an empty list.
-  const vehicleStatuses = filters.vehicleStatus.trim()
-    ? filters.vehicleStatus.trim()
-    : activeCardConfig.filter.join(',');
-
-  // Dropdown filters may be ignored by the API — pull a wider page so client
-  // matching still has enough rows to narrow (without the old 500 that timed out).
-  const hasDropdownFilters = Boolean(
-    filters.group || filters.status || filters.vehicleStatus,
-  );
-
+): Record<string, string | number> {
   const params: Record<string, string | number> = {
     pageNo: '1',
-    pageSize: hasDropdownFilters ? '250' : '100',
-    vehicleStatuses,
+    pageSize: '100',
   };
 
-  // Filter-form customer uses yapEntityId; otherwise honour dashboard customer scope.
+  // Card filter only when a status card is selected (web handleVehicleCardClick).
+  if (cardConfig) {
+    params.vehicleStatuses = cardConfig.filter.join(',');
+  }
+
+  // Web form customerId is yapEntityId from customer-vehicle-groups-list.
   if (filters.customerId.trim()) {
     params.customerId = filters.customerId.trim();
-  } else if (canScopeByCustomerId && dashboardCustomerId) {
-    params.customerId = dashboardCustomerId;
   }
 
   if (agentId) params.agentId = agentId;
-  // Short prefixes (e.g. "TN") are exact-match on many backends and return empty —
-  // keep those for client-side includes(); send fuller values to the API.
+
   const vehicleNo = filters.vehicleNo.trim().toUpperCase();
   const vehicleClass = filters.vehicleClass.trim();
   const tagId = filters.tagId.trim();
-  if (vehicleNo.length >= 4) params.vehicleNo = vehicleNo;
-  if (vehicleClass.length >= 2) params.vehicleClass = vehicleClass;
-  if (tagId.length >= 4) params.tagId = tagId;
+  if (vehicleNo) params.vehicleNo = vehicleNo;
+  if (vehicleClass) params.vehicleClass = vehicleClass;
+  if (tagId) params.tagId = tagId;
 
-  // Prefer numeric group id (web/RC parity); also send title for backends that key on name.
-  if (filters.group) {
-    const match = groupOptions.find((g) => g.title === filters.group || g.id === filters.group);
-    if (match?.id) params.vehicleGroupId = match.id;
-    const groupTitle = match?.title ?? filters.group;
-    params.group = groupTitle;
-    // RC list uses groupName — some vehicle-list builds accept the same key.
-    params.groupName = groupTitle;
-  }
+  // Web Form.Item name="group" → group title string.
+  if (filters.group.trim()) params.group = filters.group.trim();
 
-  if (filters.status) params.status = filters.status;
-  if (filters.vehicleStatus) params.vehicleStatus = filters.vehicleStatus;
+  if (filters.status.trim()) params.status = filters.status.trim();
+  if (filters.vehicleStatus.trim()) params.vehicleStatus = filters.vehicleStatus.trim();
 
   return params;
 }
@@ -113,61 +97,6 @@ function hasActiveVehicleFilters(filters: VehicleFilters, agentId: string): bool
   );
 }
 
-/**
- * Soft partial match on loaded rows so prefixes like "TN" still narrow the list
- * when the API only returns exact vehicle-number matches (or ignores short terms).
- */
-function matchesVehicleTextFilters(item: VehicleListItem, filters: VehicleFilters): boolean {
-  const vehicleNo = filters.vehicleNo.trim().toUpperCase();
-  const vehicleClass = filters.vehicleClass.trim().toUpperCase();
-  const tagId = filters.tagId.trim().toUpperCase();
-
-  if (vehicleNo && !(item.vehicleNo ?? '').toUpperCase().includes(vehicleNo)) {
-    return false;
-  }
-  // profileId is the class code shown on the FASTag tab (web parity).
-  if (vehicleClass && !(item.detail.profileId ?? '').toUpperCase().includes(vehicleClass)) {
-    return false;
-  }
-  if (tagId && !(item.detail.yapKitNumber ?? '').toUpperCase().includes(tagId)) {
-    return false;
-  }
-  return true;
-}
-
-/** Group / ON-OFF / YAP status — applied client-side so dropdown Search always narrows the list. */
-function matchesVehicleDropdownFilters(item: VehicleListItem, filters: VehicleFilters): boolean {
-  if (filters.group) {
-    const groupName = (item.vehicleGroupName ?? item.detail.vehicleGroupName ?? '').trim();
-    if (groupName.toLowerCase() !== filters.group.trim().toLowerCase()) {
-      return false;
-    }
-  }
-
-  // Prefer raw yapStatus — tagStatus can fall back to a display label and break matching.
-  const yapStatus = item.detail.yapStatus ?? item.tagStatus;
-
-  // Status dropdown: ACTIVE = switch ON, INACTIVE = switch OFF (derived from yapStatus).
-  if (filters.status === 'ACTIVE' && !isVehicleStatusOn(yapStatus)) {
-    return false;
-  }
-  if (filters.status === 'INACTIVE' && isVehicleStatusOn(yapStatus)) {
-    return false;
-  }
-
-  if (filters.vehicleStatus) {
-    if (normalizeYapStatus(yapStatus) !== normalizeYapStatus(filters.vehicleStatus)) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-function matchesVehicleFilters(item: VehicleListItem, filters: VehicleFilters): boolean {
-  return matchesVehicleTextFilters(item, filters) && matchesVehicleDropdownFilters(item, filters);
-}
-
 function uniqueCustomers(rows: CustomerFilterOption[]): CustomerFilterOption[] {
   const seen = new Set<string>();
   return rows.filter((row) => {
@@ -177,21 +106,11 @@ function uniqueCustomers(rows: CustomerFilterOption[]): CustomerFilterOption[] {
   });
 }
 
-function normalizeTextFilters(filters: VehicleFilters): Pick<VehicleFilters, 'vehicleNo' | 'vehicleClass' | 'tagId'> {
-  return {
-    vehicleNo: filters.vehicleNo.trim().toUpperCase(),
-    vehicleClass: filters.vehicleClass.trim().toUpperCase(),
-    tagId: filters.tagId.trim().toUpperCase(),
-  };
-}
-
 export default function VehiclesScreen() {
   const nav = useNavigation<any>();
-  const { user, dashboardContext } = useAppSelector(selectAuthState);
-  const customerId = dashboardContext?.customerId ?? user?.defaultCustomerId;
-  const canScopeByCustomerId = requiresAdminContextPicker(user?.roleKey);
+  const { user } = useAppSelector(selectAuthState);
 
-  const [activeCard, setActiveCard] = useState<string>('total');
+  const [activeCard, setActiveCard] = useState<string | null>('total');
   const [draftFilters, setDraftFilters] = useState<VehicleFilters>(EMPTY_VEHICLE_FILTERS);
   const [appliedFilters, setAppliedFilters] = useState<VehicleFilters>(EMPTY_VEHICLE_FILTERS);
   const [agentId, setAgentId] = useState('');
@@ -208,22 +127,18 @@ export default function VehiclesScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefresh] = useState(false);
   const [togglingVehicleNo, setTogglingVehicleNo] = useState<string | null>(null);
-  const textDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const filtersActive = useMemo(
     () => hasActiveVehicleFilters(appliedFilters, appliedAgentId),
     [appliedFilters, appliedAgentId],
   );
 
+  // null = no card filter (web after Search). Selected card → vehicleStatuses CSV.
   const activeCardConfig = useMemo(
-    () => VEHICLE_STATUS_CARDS.find((c) => c.key === activeCard) ?? VEHICLE_STATUS_CARDS[0],
+    () => (activeCard
+      ? VEHICLE_STATUS_CARDS.find((c) => c.key === activeCard) ?? null
+      : null),
     [activeCard],
-  );
-
-  // Soft client narrowing for text + Group / Status / Vehicle Status on top of API results.
-  const visibleVehicles = useMemo(
-    () => vehicles.filter((item) => matchesVehicleFilters(item, appliedFilters)),
-    [vehicles, appliedFilters],
   );
 
   useEffect(() => {
@@ -257,13 +172,8 @@ export default function VehiclesScreen() {
   useEffect(() => {
     (async () => {
       try {
-        // Prefer id+title from group-names (same source RC filters use) so we can
-        // send vehicleGroupId; fall back to titles from /vehicle/filters.
-        const [metaRes, groupRes] = await Promise.all([
-          vehicleApi.getFilterMeta(),
-          vehicleApi.getGroupNames().catch(() => ({ data: null })),
-        ]);
-
+        // Web VehicleHeader loads group titles + yapStatus from /vehicle/filters only.
+        const metaRes = await vehicleApi.getFilterMeta();
         const metaRows: VehicleFilterMetaRow[] = Array.isArray(metaRes.data)
           ? metaRes.data
           : Array.isArray((metaRes.data as any)?.data)
@@ -272,31 +182,14 @@ export default function VehiclesScreen() {
         const statuses = [...new Set(metaRows.map((row) => row.yapStatus).filter(Boolean))];
         setVehicleStatusOptions(statuses);
 
-        // Axios body may be `{ data: [...] }` or a bare array depending on gateway wrap.
-        const groupBody = (groupRes as any)?.data;
-        const namedGroups = Array.isArray(groupBody?.data)
-          ? groupBody.data
-          : Array.isArray(groupBody)
-            ? groupBody
-            : [];
-        if (namedGroups.length > 0 && namedGroups[0]?.title) {
-          const mapped: VehicleGroupOption[] = namedGroups
-            .map((g: any) => ({
-              id: String(g.id ?? ''),
-              title: String(g.title ?? '').trim(),
-            }))
-            .filter((g: VehicleGroupOption) => g.title);
-          setGroupOptions(mapped);
-        } else {
-          const titles = [
-            ...new Set(
-              metaRows.flatMap((row) =>
-                row.customer?.vehicleGroups?.map((g) => g.title) ?? [],
-              ),
+        const titles = [
+          ...new Set(
+            metaRows.flatMap((row) =>
+              row.customer?.vehicleGroups?.map((g) => g.title) ?? [],
             ),
-          ].filter(Boolean) as string[];
-          setGroupOptions(titles.map((title) => ({ id: '', title })));
-        }
+          ),
+        ].filter(Boolean) as string[];
+        setGroupOptions(titles.map((title) => ({ id: '', title })));
       } catch { /* optional filter source */ }
     })();
   }, []);
@@ -304,21 +197,14 @@ export default function VehiclesScreen() {
   const fetchData = useCallback(async (
     filters: VehicleFilters,
     activeAgentId: string,
-    cardConfig: VehicleStatusCard,
+    cardConfig: VehicleStatusCard | null,
     isRefresh = false,
   ) => {
     isRefresh ? setRefresh(true) : setLoading(true);
 
     try {
       const { data } = await vehicleApi.getList(
-        buildVehicleQueryParams(
-          cardConfig,
-          filters,
-          activeAgentId,
-          customerId ?? undefined,
-          canScopeByCustomerId,
-          groupOptions,
-        ) as any,
+        buildVehicleQueryParams(cardConfig, filters, activeAgentId) as any,
       );
 
       const mapped = (data.result?.rows ?? []).map(mapVehicleListRow);
@@ -335,61 +221,16 @@ export default function VehiclesScreen() {
       setLoading(false);
       setRefresh(false);
     }
-  }, [customerId, canScopeByCustomerId, groupOptions]);
+  }, []);
 
+  // Refetch when applied filters, agent, or status card change.
   useEffect(() => {
     fetchData(appliedFilters, appliedAgentId, activeCardConfig);
   }, [fetchData, appliedFilters, appliedAgentId, activeCardConfig]);
 
-  // Live debounce for text fields — updates applied filters so list refreshes while typing.
-  useEffect(() => {
-    if (textDebounceRef.current) {
-      clearTimeout(textDebounceRef.current);
-      textDebounceRef.current = null;
-    }
-
-    const nextText = normalizeTextFilters(draftFilters);
-    const appliedText = normalizeTextFilters(appliedFilters);
-    const textUnchanged =
-      nextText.vehicleNo === appliedText.vehicleNo
-      && nextText.vehicleClass === appliedText.vehicleClass
-      && nextText.tagId === appliedText.tagId;
-
-    if (textUnchanged) return;
-
-    const applyText = () => {
-      setAppliedFilters((prev) => ({
-        ...prev,
-        vehicleNo: nextText.vehicleNo,
-        vehicleClass: nextText.vehicleClass,
-        tagId: nextText.tagId,
-      }));
-    };
-
-    // Clear applies immediately; typed terms wait so we don't spam the API per key.
-    if (!nextText.vehicleNo && !nextText.vehicleClass && !nextText.tagId) {
-      applyText();
-      return;
-    }
-
-    textDebounceRef.current = setTimeout(applyText, TEXT_FILTER_DEBOUNCE_MS);
-    return () => {
-      if (textDebounceRef.current) {
-        clearTimeout(textDebounceRef.current);
-        textDebounceRef.current = null;
-      }
-    };
-  }, [
-    draftFilters.vehicleNo,
-    draftFilters.vehicleClass,
-    draftFilters.tagId,
-    appliedFilters.vehicleNo,
-    appliedFilters.vehicleClass,
-    appliedFilters.tagId,
-  ]);
-
   const handleCardPress = (card: VehicleStatusCard) => {
-    setActiveCard((prev) => (prev === card.key ? 'total' : card.key));
+    // Toggle off → clear card filter (web has no vehicleStatuses). Same card again keeps it.
+    setActiveCard((prev) => (prev === card.key ? null : card.key));
   };
 
   const handleDraftChange = (next: VehicleFilters) => {
@@ -399,44 +240,48 @@ export default function VehiclesScreen() {
     });
   };
 
-  /** Search applies every draft field (dropdowns + text) and closes the panel. */
+  /**
+   * Search applies form fields and clears card vehicleStatuses — same as web
+   * setVehicleQueryParams(values) after wiping previous params.
+   */
   const handleSearch = () => {
-    if (textDebounceRef.current) {
-      clearTimeout(textDebounceRef.current);
-      textDebounceRef.current = null;
-    }
     const nextFilters: VehicleFilters = {
       ...draftFilters,
-      ...normalizeTextFilters(draftFilters),
+      vehicleNo: draftFilters.vehicleNo.trim().toUpperCase(),
+      vehicleClass: draftFilters.vehicleClass.trim(),
+      tagId: draftFilters.tagId.trim(),
     };
     setDraftFilters(nextFilters);
     setAppliedFilters(nextFilters);
     setAppliedAgentId(agentId);
+    setActiveCard(null);
     setShowFilters(false);
   };
 
   const handleReset = () => {
-    if (textDebounceRef.current) {
-      clearTimeout(textDebounceRef.current);
-      textDebounceRef.current = null;
-    }
     setDraftFilters(EMPTY_VEHICLE_FILTERS);
     setAgentId('');
     setAppliedFilters(EMPTY_VEHICLE_FILTERS);
     setAppliedAgentId('');
+    setActiveCard('total');
   };
 
-  // Export uses the same filter scope as the list — Excel and PDF for any filters.
+  // Export uses the same payload as the list; PDF requires vehicleNo (web parity).
   const handleExport = async (format: 'excel' | 'pdf') => {
     if (exporting) return;
+
+    if (format === 'pdf' && !appliedFilters.vehicleNo.trim()) {
+      Alert.alert(
+        'Vehicle required',
+        'Please choose vehicle no in filter',
+      );
+      return;
+    }
 
     const listParams = buildVehicleQueryParams(
       activeCardConfig,
       appliedFilters,
       appliedAgentId,
-      customerId ?? undefined,
-      canScopeByCustomerId,
-      groupOptions,
     );
     const exportParams = {...listParams};
     delete exportParams.pageNo;
@@ -642,7 +487,7 @@ export default function VehiclesScreen() {
         </View>
       ) : (
         <FlatList
-          data={visibleVehicles}
+          data={vehicles}
           keyExtractor={(v) => `${v.vehicleNo}-${v.id}`}
           renderItem={renderItem}
           ListHeaderComponent={listHeader}

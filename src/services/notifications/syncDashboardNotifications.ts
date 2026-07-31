@@ -2,9 +2,9 @@
  * Derives fleet alerts from the dashboard summary (due / finished work) and
  * mirrors them into the local notification inbox — same rules as the web portal.
  *
- * Each alert sets a short `body` for the collapsed OS banner and a multi-line
- * `detail` for the expanded shade (Inbox / BigText). Putting the full metrics
- * only in `body` made some OEMs show just the last line (e.g. "Expired: 16").
+ * Each alert sets a short `body` for the in-app inbox summary and a multi-line
+ * `detail` for the full message. The system tray flattens `detail` into one
+ * visible line so OEMs do not hide content behind expand/collapse.
  */
 
 import type { Announcement, ComplianceSummary, DashboardSummary } from '../../types/dashboard';
@@ -93,7 +93,7 @@ export function deriveDashboardNotifications(
     // Collapsed banner stays one line; expand shows balance / limit detail.
     const walletBody = walletAlert.isEmpty
       ? 'FASTag wallet is empty — recharge now'
-      : `Balance ${formatINR(walletAlert.totalBalance)} · limit ${formatINR(walletThreshold)}`;
+      : `Balance ${formatINR(walletAlert.totalBalance)}, limit ${formatINR(walletThreshold)}`;
 
     out.push({
       id: 'dash-wallet',
@@ -118,7 +118,7 @@ export function deriveDashboardNotifications(
       id: 'dash-compliance',
       category: 'rc_expiry',
       title: 'Vahan Compliance',
-      body: `Expired ${expiredCompliance} · Expiring ${expiringCompliance}`,
+      body: `Expired ${expiredCompliance}, Expiring ${expiringCompliance}`,
       detail: complianceDetail,
       createdAt: now,
       read: false,
@@ -133,7 +133,7 @@ export function deriveDashboardNotifications(
       id: 'dash-challans',
       category: 'echallan',
       title: 'E-challan',
-      body: `${pendingChallans} pending · ${dueAmount}`,
+      body: `${pendingChallans} pending, ${dueAmount}`,
       detail: [
         `Pending Challans: ${pendingChallans}`,
         `Due Amount: ${dueAmount}`,
@@ -150,7 +150,7 @@ export function deriveDashboardNotifications(
     const expiring = summary.drivers.expiringSoon ?? 0;
     const expired = summary.drivers.expired ?? 0;
     // Short collapsed summary — avoids OEM trays showing only "Expired: N".
-    const driverBody = `${driverAlertCount} need attention · ${expired} expired`;
+    const driverBody = `${driverAlertCount} need attention, ${expired} expired`;
     const driverDetail = [
       `${driverAlertCount} need attention`,
       `Suspended: ${suspended}`,
@@ -176,7 +176,7 @@ export function deriveDashboardNotifications(
       id: 'dash-claims',
       category: 'claim_update',
       title: 'Claim',
-      body: `${approvedClaims} claim${approvedClaims > 1 ? 's' : ''} approved · ${recovered}`,
+      body: `${approvedClaims} claim${approvedClaims > 1 ? 's' : ''} approved, ${recovered}`,
       detail: [
         `${approvedClaims} toll claim${approvedClaims > 1 ? 's' : ''} approved`,
         `Recovered Amount: ${recovered}`,
@@ -191,7 +191,7 @@ export function deriveDashboardNotifications(
     .filter((item) => item.showAsDashboardAlert)
     .forEach((item) => {
       const announcementBody =
-        item.message || (item.category ? `Update · ${item.category}` : 'Karins update');
+        item.message || (item.category ? `Update, ${item.category}` : 'Karins update');
       // Keep announcement body as the collapsed line; detail mirrors for expand.
       out.push({
         id: `dash-announcement-${item.id}`,

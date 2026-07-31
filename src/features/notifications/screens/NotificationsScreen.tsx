@@ -194,7 +194,7 @@ export default function NotificationsScreen() {
               ))}
             </View>
           ) : (
-            // No numberOfLines — let long alert copy wrap onto the next line fully.
+            // Prefer detail when present; wrap naturally for readable alert copy.
             <Text style={styles.body}>{displayText}</Text>
           )}
           <View style={styles.footerRow}>

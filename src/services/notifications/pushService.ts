@@ -4,16 +4,16 @@
  * Requires `android/app/google-services.json` from the Firebase console
  * (package name: com.karins). Without it, push calls no-op safely.
  *
- * Tray layout: short `body` for the collapsed banner + Inbox/BigText for expand.
- * MessagingStyle is intentionally avoided — many OEMs collapse it to the last
- * chat line (e.g. only "Expired: 16") under the persona name "Karins Fleet".
+ * Tray layout: put the full alert copy in `body` (single line) so the system
+ * notification box shows the complete message without expand/collapse.
+ * MessagingStyle / InboxStyle / BigText are avoided — OEMs reverse, truncate,
+ * or hide content behind a chevron with those styles.
  */
 
 import { Platform } from 'react-native';
 import type { FirebaseMessagingTypes } from '@react-native-firebase/messaging';
 import notifee, {
   AndroidImportance,
-  AndroidStyle,
   EventType,
   AuthorizationStatus,
 } from '@notifee/react-native';
@@ -47,69 +47,22 @@ export const ANDROID_NOTIFICATION_SMALL_ICON = 'ic_stat_notification';
 const ANDROID_NOTIFICATION_LARGE_ICON = 'ic_launcher';
 /** Matches android/app/src/main/res/values/colors.xml notification_accent. */
 const ANDROID_NOTIFICATION_COLOR = '#16B7F3';
-/** Soft-wrap width for expanded Inbox/BigText lines. */
-const ANDROID_NOTIFICATION_WRAP_CHARS = 40;
 let openHandlersRegistered = false;
 let notifeeHandlersRegistered = false;
 
 /**
- * Break long notification copy into short lines so Android shows overflow on the
- * next row instead of truncating mid-word with "...".
+ * Flatten multi-line detail into one tray line so Android shows the full message
+ * in the notification box instead of hiding lines behind expand/collapse.
  */
-function wrapNotificationLines(text: string, maxChars = ANDROID_NOTIFICATION_WRAP_CHARS): string[] {
-  const paragraphs = text
-    .split(/\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-
-  const lines: string[] = [];
-  paragraphs.forEach((paragraph) => {
-    if (paragraph.length <= maxChars) {
-      lines.push(paragraph);
-      return;
-    }
-
-    // Word-wrap within each paragraph so phrases stay readable across lines.
-    const words = paragraph.split(/\s+/);
-    let current = '';
-    words.forEach((word) => {
-      const next = current ? `${current} ${word}` : word;
-      if (next.length > maxChars && current) {
-        lines.push(current);
-        current = word;
-      } else {
-        current = next;
-      }
-    });
-    if (current) lines.push(current);
-  });
-
-  return lines.length > 0 ? lines : [text.trim() || 'Karins Fleet'];
-}
-
-/**
- * Collapsed tray row uses Notifee's `body`; expanded shade uses Inbox (metric
- * lists) or BigText (paragraphs). Avoid MessagingStyle — it renders as a chat
- * conversation and OEMs often show only the last line under "Karins Fleet".
- */
-function buildAndroidTextStyle(text: string) {
-  const lines = wrapNotificationLines(text);
-
-  if (lines.length > 1) {
-    return {
-      type: AndroidStyle.INBOX as const,
-      lines,
-    };
-  }
-
-  return {
-    type: AndroidStyle.BIGTEXT as const,
-    text: lines[0] ?? text,
-  };
+function formatTrayBody(notification: Pick<FleetNotification, 'body' | 'detail'>): string {
+  const fullText = (notification.detail ?? notification.body).trim();
+  if (!fullText) return 'Karins Fleet';
+  // Keep intentional sections readable in one row (comma-separated, no BigText chevron).
+  return fullText.replace(/\s*\n+\s*/g, ', ');
 }
 
 /** Shared Android tray chrome so local + FCM alerts look the same across OEMs. */
-function buildAndroidDisplayOptions(fullText: string, options?: { onlyAlertOnce?: boolean }) {
+function buildAndroidDisplayOptions(options?: { onlyAlertOnce?: boolean }) {
   return {
     channelId: ANDROID_CHANNEL_ID,
     pressAction: { id: 'default' as const },
@@ -119,7 +72,6 @@ function buildAndroidDisplayOptions(fullText: string, options?: { onlyAlertOnce?
     importance: AndroidImportance.HIGH,
     sound: 'default',
     onlyAlertOnce: options?.onlyAlertOnce ?? false,
-    style: buildAndroidTextStyle(fullText),
   };
 }
 
@@ -235,19 +187,18 @@ export const pushService = {
       }
       if (!canShow) return false;
 
-      // Collapsed banner = short body; expanded shade = detail (or body fallback).
-      const summaryBody = notification.body;
-      const fullText = notification.detail ?? notification.body;
+      // Full detail in body (one line) — no short/collapse summary and no BigText chevron.
+      const trayBody = formatTrayBody(notification);
       await notifee.displayNotification({
         id: notification.id,
         title: notification.title,
-        body: summaryBody,
+        body: trayBody,
         data: {
           category: notification.category,
           createdAt: notification.createdAt,
           ...(notification.data ?? {}),
         },
-        android: buildAndroidDisplayOptions(fullText, options),
+        android: buildAndroidDisplayOptions(options),
         ios: {
           foregroundPresentationOptions: {
             alert: true,
@@ -359,17 +310,17 @@ export const pushService = {
       // Ensure channel exists even if this path runs before sessionReady / Notifee bootstrap.
       await pushService.ensureAndroidChannel();
 
-      const fullText = mapped.detail ?? mapped.body;
+      const trayBody = formatTrayBody(mapped);
       await notifee.displayNotification({
         id: mapped.id,
         title: mapped.title,
-        body: mapped.body,
+        body: trayBody,
         data: {
           ...mapped.data,
           category: mapped.category,
           createdAt: mapped.createdAt,
         },
-        android: buildAndroidDisplayOptions(fullText),
+        android: buildAndroidDisplayOptions(),
       });
     } catch {
       /* display is best-effort */

@@ -390,7 +390,36 @@ export default function TollTransactionsScreen() {
     setVehicleScoped(false);
     setSearchInput(text.toUpperCase());
   };
+
+  /** Reset period, txn type, and search — same as web TollTransactionReportHeader Reset. */
+  const handleClearFilters = () => {
+    if (searchDebounceRef.current) {
+      clearTimeout(searchDebounceRef.current);
+      searchDebounceRef.current = null;
+    }
+    setVehicleScoped(false);
+    setSearchInput('');
+    setSearch('');
+    setSearchType('vehicleNo');
+    setTxnType('');
+    setTxnTypeOpen(false);
+    setCustomRange(null);
+    setDateFilter({ mode: 'preset', dateRange: DEFAULT_TOLL_LIST_RANGE });
+  };
+
   const handleExport = async (format: 'excel' | 'pdf') => {
+    // PDF must be scoped to a vehicle — location/RRN-only exports are Excel-only.
+    const vehicleTerm = searchType === 'vehicleNo'
+      ? normalizeSearchTerm(search, 'vehicleNo')
+      : '';
+    if (format === 'pdf' && !vehicleTerm) {
+      Alert.alert(
+        'Vehicle required',
+        'Please select search type Vehicle and enter Vehicle No before exporting PDF.',
+      );
+      return;
+    }
+
     const exportParams = buildExportParams(
       dateFilter,
       searchType,
@@ -610,6 +639,16 @@ export default function TollTransactionsScreen() {
             </TouchableOpacity>
           ) : null}
         </View>
+
+        <TouchableOpacity
+          style={styles.clearBtn}
+          onPress={handleClearFilters}
+          activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel="Clear filters"
+        >
+          <Text style={styles.clearBtnText}>Clear</Text>
+        </TouchableOpacity>
 
         {visibleTotal > 0 && (
           <View style={styles.summaryBar}>
@@ -835,6 +874,20 @@ const styles = StyleSheet.create({
   searchIcon: { fontSize: 14 },
   searchInput: { flex: 1, fontSize: FontSize.base, color: Colors.white },
   clearSearch: { fontSize: 14, color: Colors.text.subtle, paddingHorizontal: 4 },
+  clearBtn: {
+    marginTop: 8,
+    backgroundColor: Colors.glass.bg,
+    borderWidth: 1,
+    borderColor: Colors.glass.border,
+    borderRadius: Radius.md,
+    paddingVertical: 11,
+    alignItems: 'center',
+  },
+  clearBtnText: {
+    fontSize: FontSize.sm,
+    fontWeight: '600',
+    color: Colors.text.secondary,
+  },
   summaryBar: { marginTop: 6, marginBottom: 2 },
   summaryText: { fontSize: FontSize.xs, color: Colors.text.subtle, fontWeight: '500' },
   loadingContainer: { padding: Spacing[4], gap: 8 },

@@ -1,6 +1,7 @@
 import { apiClient } from './client';
 import type { VehicleRecord } from '../../types/dashboard';
 
+/** Query params for /vehicle/vehicle-list — same keys as web VehicleQueryProps. */
 export interface VehicleParams {
   pageNo: string;
   pageSize: string;
@@ -11,14 +12,14 @@ export interface VehicleParams {
   vehicleNo?: string;
   vehicleClass?: string;
   tagId?: string;
+  /** Group title from /vehicle/filters (web Form.Item name="group") */
   group?: string;
-  /** Some list endpoints key groups the same way as RC (`groupName`). */
-  groupName?: string;
   /** ACTIVE / INACTIVE — web ON/OFF status filter */
   status?: string;
   /** Single YAP status from filter dropdown */
   vehicleStatus?: string;
   agentId?: number | string;
+  /** URL drilldown only on web — optional here */
   vehicleGroupId?: string;
 }
 

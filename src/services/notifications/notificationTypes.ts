@@ -6,11 +6,11 @@ export interface FleetNotification {
   id: string;
   category: string;
   title: string;
-  /** Short one-liner shown in the collapsed notification row. */
+  /** Short one-liner for the in-app inbox list. */
   body: string;
   /**
-   * Optional full multi-line text shown when the notification is expanded
-   * (Android BigText expanded view). Falls back to `body` when absent.
+   * Optional full message used by the system tray (flattened to one line so
+   * Android shows everything without expand/collapse). Falls back to `body`.
    */
   detail?: string;
   createdAt: string;
