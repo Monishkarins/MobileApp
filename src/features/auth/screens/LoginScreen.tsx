@@ -156,7 +156,7 @@ export default function LoginScreen({ navigation }: Props) {
             >
               {isLoading
                 ? <ActivityIndicator color={Colors.navy} />
-                : <Text style={styles.ctaText}>Sign In →</Text>
+                : <Text style={styles.ctaText}>SignIn →</Text>
               }
             </TouchableOpacity>
 
@@ -176,8 +176,6 @@ export default function LoginScreen({ navigation }: Props) {
               <Text style={styles.pinText}>Sign in with PIN</Text>
             </TouchableOpacity>
           </GlassCard>
-
-          <Text style={styles.securityNote}>🔒 TLS 1.3 · iOS Keychain · Secured</Text>
 
           <TouchableOpacity
             style={styles.demoLink}

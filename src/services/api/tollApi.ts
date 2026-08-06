@@ -1,3 +1,9 @@
+/**
+ * Toll ledger API — list, export, and related toll endpoints.
+ * Custom fromDate/toDate must be query-encoded like web (spaces as %20) so the
+ * backend can resolve live vs arch_vehicle_toll_history for older years.
+ */
+
 import { apiClient } from './client';
 import type { TollTransaction, PaginatedResponse } from '../../types/dashboard';
 
@@ -68,6 +74,27 @@ function buildTollQueryParams(params: TollParams | TollExportParams): Record<str
   return query;
 }
 
+/**
+ * Build the query string the same way web does (URLSearchParams + %20 for spaces).
+ * encodeURIComponent always yields %20 for spaces — never `+` — so Express/moment
+ * receive `2022-01-01 00:00:00` and archive routing can run.
+ */
+function serializeTollQueryParams(params: Record<string, unknown>): string {
+  return Object.entries(params)
+    .filter(([, value]) => value !== undefined && value !== null && value !== '')
+    .map(([key, value]) => {
+      // Booleans must be the strings Express compares (`showAllTxn === 'true'`).
+      const raw = typeof value === 'boolean' ? (value ? 'true' : 'false') : String(value);
+      return `${encodeURIComponent(key)}=${encodeURIComponent(raw)}`;
+    })
+    .join('&');
+}
+
+function tollRequestUrl(path: string, params: TollParams | TollExportParams): string {
+  const qs = serializeTollQueryParams(buildTollQueryParams(params));
+  return qs ? `${path}?${qs}` : path;
+}
+
 /** Binary export GETs must not force JSON Content-Type — that breaks some gateways. */
 const BINARY_EXPORT_CONFIG = {
   responseType: 'arraybuffer' as const,
@@ -79,33 +106,38 @@ const BINARY_EXPORT_CONFIG = {
 };
 
 export const tollApi = {
+  // Put dates in the URL ourselves (not axios params) — matches web and avoids
+  // serializer differences that drop/break fromDate/toDate on some RN builds.
   getTransactions: (params: TollParams) =>
     apiClient.get<TollTransactionResponse>(
-      '/transaction/toll/toll-transactions',
-      { params: buildTollQueryParams(params) },
+      tollRequestUrl('/transaction/toll/toll-transactions', params),
+      {
+        // Archive/custom ranges (e.g. 2022) can exceed the default 20s client timeout.
+        ...(params.fromDate && params.toDate ? { timeout: 120_000 } : {}),
+      },
     ),
 
   exportTransactionsExcel: (params: TollExportParams) =>
-    apiClient.get<ArrayBuffer>('/transaction/toll/export-toll-transactions', {
-      params: buildTollQueryParams(params),
-      ...BINARY_EXPORT_CONFIG,
-    }),
+    apiClient.get<ArrayBuffer>(
+      tollRequestUrl('/transaction/toll/export-toll-transactions', params),
+      BINARY_EXPORT_CONFIG,
+    ),
 
   exportTransactionsPdf: (params: TollExportParams) =>
-    apiClient.get<ArrayBuffer>('/transaction/toll/export-toll-transactions-pdf', {
-      params: buildTollQueryParams(params),
-      ...BINARY_EXPORT_CONFIG,
-    }),
+    apiClient.get<ArrayBuffer>(
+      tollRequestUrl('/transaction/toll/export-toll-transactions-pdf', params),
+      BINARY_EXPORT_CONFIG,
+    ),
 
   getRecentTransactions: (pageSize = 10) =>
-    apiClient.get<TollTransactionResponse>('/transaction/toll/toll-transactions', {
-      params: {
+    apiClient.get<TollTransactionResponse>(
+      tollRequestUrl('/transaction/toll/toll-transactions', {
         pageNo: 1,
         pageSize,
         tollReaderDateTimeSort: 'descend',
         showAllTxn: true,
-      },
-    }),
+      }),
+    ),
 
   getTransaction: (id: number) =>
     apiClient.get<TollTransaction>(`/transaction/toll/${id}`),

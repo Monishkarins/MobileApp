@@ -10,8 +10,7 @@
 
 declare const __DEV__: boolean;
 
-export const IS_DEV: boolean =
-  typeof __DEV__ !== 'undefined' ? __DEV__ : false;
+export const IS_DEV: boolean = typeof __DEV__ !== "undefined" ? __DEV__ : false;
 
 /**
  * Mock/demo data flag. DEV-ONLY by construction — never true in release.
@@ -22,20 +21,24 @@ export const ENABLE_MOCK_DATA: boolean = IS_DEV;
 /**
  * API base URL — same production host as the working Android APK.
  * Override at build time via KARINS_API_URL if needed.
+ *
+ * Emulator tip (Android): use http://10.0.2.2:8080/api to hit Node on your PC.
+ * Broadcasts come from GET /notification (same as web) — no Firebase required.
  */
 export const API_BASE_URL: string =
-  (typeof process !== 'undefined' && process.env && process.env.KARINS_API_URL) ||
-  'https://api.karins.in/api';
+  (typeof process !== "undefined" &&
+    process.env &&
+    process.env.KARINS_API_URL) ||
+  "https://api.karins.in/api";
 
 /** Network request timeout (ms). */
 export const API_TIMEOUT_MS = 20000;
 
 /** Block the app on rooted/jailbroken devices (vs. warn). Controlled by env. */
 export const BLOCK_ON_ROOT: boolean =
-  typeof process !== 'undefined' &&
+  typeof process !== "undefined" &&
   !!process.env &&
-  process.env.KARINS_BLOCK_ON_ROOT === 'true';
+  process.env.KARINS_BLOCK_ON_ROOT === "true";
 
-
-  //https://testapi.karins.in/api
-  //https://api.karins.in/api
+//https://testapi.karins.in/api
+//https://api.karins.in/api

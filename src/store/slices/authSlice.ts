@@ -16,7 +16,6 @@ import {
 } from '../../types/auth';
 import { switchActiveCustomer } from '../../services/auth/customerSwitch';
 import { signInWithPinLogin, syncPinLoginPreference, enablePinLogin } from '../../services/auth/pinAuthService';
-import { registerPushDevice } from '../../services/notifications/registerPushDevice';
 
 /** Same wording as a bad-credentials failure so restricted roles are not tipped off. */
 const MOBILE_LOGIN_BLOCKED_MESSAGE = 'Username and password is invalid';
@@ -131,9 +130,6 @@ export const signIn = createAsyncThunk<
       // Ignore — user can still use password login.
     }
 
-    // Register FCM token with backend as soon as the session is persisted.
-    void registerPushDevice();
-
     return { user: sessionUser };
   } catch (error: unknown) {
     // Cleanup must never swallow the real sign-in error (Keychain throws on Appetize).
@@ -178,8 +174,6 @@ export const signInWithPin = createAsyncThunk<
     );
     SecureStorage.setLastLoginMobile(resolvedMobile);
     enablePinLogin(resolvedMobile);
-
-    void registerPushDevice();
 
     return { user: sessionUser };
   } catch (error: unknown) {
@@ -229,8 +223,6 @@ export const restoreSession = createAsyncThunk<
     }
 
     markApiSessionActive();
-    // Re-bind FCM token after cold start when google-services.json is configured.
-    void registerPushDevice();
     return { user };
   },
 );

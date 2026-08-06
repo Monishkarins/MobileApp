@@ -2,9 +2,13 @@
  * Custom toll date-range picker — mirrors web From/To with calendar selection.
  * Tapping a date field opens a native calendar; times default to 00:00 (from) and
  * 23:59 (to) to match the web DatePicker defaults.
+ * No min/max calendar window — any month/year/date is selectable.
+ *
+ * Android DateTimePicker is rendered outside this Modal: nesting the system
+ * dialog inside an RN Modal often auto-dismisses and sticks near "today".
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Modal,
   View,
@@ -18,9 +22,6 @@ import {
 import type { DateTimePickerEvent } from '@react-native-community/datetimepicker';
 import dayjs from 'dayjs';
 import { Colors, FontSize, Spacing, Radius } from '../../../theme';
-
-const EARLIEST_TOLL_FROM_DATE = dayjs('2025-04-01');
-const MAX_CUSTOM_RANGE_DAYS = 60;
 
 export interface TollCustomDateRange {
   fromDate: string;
@@ -39,25 +40,29 @@ type ActivePicker = 'from' | 'to' | null;
 type DatePickerComponent = React.ComponentType<{
   value: Date;
   mode: 'date';
-  display: 'inline' | 'calendar' | 'default';
-  minimumDate?: Date;
-  maximumDate?: Date;
+  display: 'inline' | 'calendar' | 'spinner' | 'default';
   onChange: (event: DateTimePickerEvent, date?: Date) => void;
   themeVariant?: 'dark' | 'light';
 }>;
 
-// FY window caps selectable dates the same way the web DatePicker disabledDate does.
-function getMaxSelectableDate(): Date {
-  const today = dayjs();
-  const fyEndYear = (today.month() >= 3 ? today.year() : today.year() - 1) + 1;
-  const fyEnd = dayjs(`${fyEndYear}-03-31`).endOf('day');
-  return (today.isBefore(fyEnd) ? today : fyEnd).toDate();
-}
-
 function parseInitialDate(value?: string): Date | null {
   if (!value) return null;
-  const parsed = dayjs(value);
-  return parsed.isValid() ? parsed.toDate() : null;
+  // Prefer the leading YYYY-MM-DD so "YYYY-MM-DD HH:mm" never depends on Date.parse.
+  const ymd = value.trim().slice(0, 10);
+  const parsed = dayjs(ymd);
+  if (parsed.isValid() && /^\d{4}-\d{2}-\d{2}$/.test(ymd)) {
+    return new Date(parsed.year(), parsed.month(), parsed.date(), 12, 0, 0, 0);
+  }
+  const fallback = dayjs(value);
+  return fallback.isValid() ? fallback.toDate() : null;
+}
+
+/** Format a Date using local calendar parts — avoids UTC day-shift on Android. */
+function formatLocalYmd(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
 }
 
 function formatDisplayDate(date: Date | null): string {
@@ -103,17 +108,11 @@ export default function TollDateRangeModal({
   const [pickerLoading, setPickerLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const maxDate = useMemo(() => getMaxSelectableDate(), []);
-  const minFromDate = EARLIEST_TOLL_FROM_DATE.toDate();
-  const minToDate = useMemo(() => {
-    if (fromDate && dayjs(fromDate).isAfter(EARLIEST_TOLL_FROM_DATE, 'day')) {
-      return fromDate;
-    }
-    return minFromDate;
-  }, [fromDate, minFromDate]);
-
   useEffect(() => {
-    if (!visible) return;
+    if (!visible) {
+      setActivePicker(null);
+      return;
+    }
     setFromDate(parseInitialDate(initialRange?.fromDate));
     setToDate(parseInitialDate(initialRange?.toDate));
     setActivePicker(null);
@@ -152,21 +151,38 @@ export default function TollDateRangeModal({
   }, [activePicker]);
 
   const handlePickerChange = (event: DateTimePickerEvent, selected?: Date) => {
-    // Android closes the dialog after selection; iOS keeps the inline picker open.
+    // Android dialog is one-shot — close only after confirm or cancel.
+    // Ignoring non-set events prevents spinner wheel ticks from dismissing early.
     if (Platform.OS === 'android') {
+      if (event.type === 'dismissed') {
+        setActivePicker(null);
+        return;
+      }
+      if (event.type && event.type !== 'set') {
+        return;
+      }
       setActivePicker(null);
     }
 
     if (event.type === 'dismissed' || !selected) return;
 
+    // Rebuild from local Y/M/D so Android timezone quirks cannot shift the day
+    // when selecting older months/years.
+    const localDate = new Date(
+      selected.getFullYear(),
+      selected.getMonth(),
+      selected.getDate(),
+      12, 0, 0, 0,
+    );
+
     if (activePicker === 'from') {
-      setFromDate(selected);
+      setFromDate(localDate);
       // Clear an invalid to-date when the new from-date moves past it.
-      if (toDate && dayjs(toDate).isBefore(selected, 'day')) {
+      if (toDate && dayjs(toDate).isBefore(localDate, 'day')) {
         setToDate(null);
       }
     } else if (activePicker === 'to') {
-      setToDate(selected);
+      setToDate(localDate);
     }
 
     setError(null);
@@ -178,21 +194,12 @@ export default function TollDateRangeModal({
       return;
     }
 
-    const fromStr = `${dayjs(fromDate).format('YYYY-MM-DD')} 00:00`;
-    const toStr = `${dayjs(toDate).format('YYYY-MM-DD')} 23:59`;
+    // Match web TollTxnReportHeader: `YYYY-MM-DD HH:mm` (backend moment expands to seconds).
+    const fromStr = `${formatLocalYmd(fromDate)} 00:00`;
+    const toStr = `${formatLocalYmd(toDate)} 23:59`;
 
-    if (dayjs(fromStr).isBefore(EARLIEST_TOLL_FROM_DATE, 'day')) {
-      setError('From date cannot be before 01-04-2025');
-      return;
-    }
-
-    if (dayjs(toStr).isBefore(dayjs(fromStr))) {
+    if (formatLocalYmd(toDate) < formatLocalYmd(fromDate)) {
       setError('To date must be on or after From date');
-      return;
-    }
-
-    if (dayjs(toStr).diff(dayjs(fromStr), 'day') > MAX_CUSTOM_RANGE_DAYS) {
-      setError('Selected range should not exceed 60 days');
       return;
     }
 
@@ -200,75 +207,100 @@ export default function TollDateRangeModal({
     onClose();
   };
 
+  // Fall back to today so the first open starts on a sensible month/year.
   const pickerValue = activePicker === 'to'
-    ? (toDate ?? minToDate)
-    : (fromDate ?? minFromDate);
+    ? (toDate ?? fromDate ?? new Date())
+    : (fromDate ?? new Date());
+
+  // Keep calendar/default (not spinner): spinner can fire onChange on every wheel
+  // tick and dismiss before the user reaches 2022. Calendar confirms only on OK.
+  const androidPicker = Platform.OS === 'android'
+    && visible
+    && activePicker
+    && DatePickerComponent
+    && !pickerLoading
+    ? (
+      <DatePickerComponent
+        value={pickerValue}
+        mode="date"
+        display="default"
+        onChange={handlePickerChange}
+      />
+    )
+    : null;
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView
-        style={styles.overlay}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
-        <View style={styles.sheet}>
-          <Text style={styles.title}>Custom Date Range</Text>
-          <Text style={styles.hint}>Tap a field to open the calendar</Text>
+    <>
+      <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+        <KeyboardAvoidingView
+          style={styles.overlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <View style={styles.sheet}>
+            <Text style={styles.title}>Custom Date Range</Text>
+            <Text style={styles.hint}>Tap a field to open the calendar</Text>
 
-          <DateField
-            label="From"
-            value={fromDate}
-            placeholder="Select from date"
-            isActive={activePicker === 'from'}
-            onPress={() => setActivePicker('from')}
-          />
+            <DateField
+              label="From"
+              value={fromDate}
+              placeholder="Select from date"
+              isActive={activePicker === 'from'}
+              onPress={() => setActivePicker('from')}
+            />
 
-          <DateField
-            label="To"
-            value={toDate}
-            placeholder="Select to date"
-            isActive={activePicker === 'to'}
-            onPress={() => setActivePicker('to')}
-          />
+            <DateField
+              label="To"
+              value={toDate}
+              placeholder="Select to date"
+              isActive={activePicker === 'to'}
+              onPress={() => setActivePicker('to')}
+            />
 
-          {activePicker ? (
-            <View style={styles.pickerWrap}>
-              {pickerLoading || !DatePickerComponent ? (
-                <ActivityIndicator color={Colors.blue} style={styles.pickerLoader} />
-              ) : (
-                <DatePickerComponent
-                  value={pickerValue}
-                  mode="date"
-                  display={Platform.OS === 'ios' ? 'inline' : 'calendar'}
-                  minimumDate={activePicker === 'from' ? minFromDate : minToDate}
-                  maximumDate={maxDate}
-                  onChange={handlePickerChange}
-                  themeVariant="dark"
-                />
-              )}
-              {Platform.OS === 'ios' ? (
-                <TouchableOpacity
-                  style={styles.donePickerBtn}
-                  onPress={() => setActivePicker(null)}
-                >
-                  <Text style={styles.donePickerText}>Done</Text>
-                </TouchableOpacity>
-              ) : null}
+            {Platform.OS === 'ios' && activePicker ? (
+              <View style={styles.pickerWrap}>
+                {pickerLoading || !DatePickerComponent ? (
+                  <ActivityIndicator color={Colors.blue} style={styles.pickerLoader} />
+                ) : (
+                  <>
+                    <DatePickerComponent
+                      value={pickerValue}
+                      mode="date"
+                      display="spinner"
+                      onChange={handlePickerChange}
+                      themeVariant="dark"
+                    />
+                    <TouchableOpacity
+                      style={styles.donePickerBtn}
+                      onPress={() => setActivePicker(null)}
+                    >
+                      <Text style={styles.donePickerText}>Done</Text>
+                    </TouchableOpacity>
+                  </>
+                )}
+              </View>
+            ) : null}
+
+            {Platform.OS === 'android' && activePicker && pickerLoading ? (
+              <ActivityIndicator color={Colors.blue} style={styles.pickerLoader} />
+            ) : null}
+
+            {error ? <Text style={styles.error}>{error}</Text> : null}
+
+            <View style={styles.actions}>
+              <TouchableOpacity style={styles.cancelBtn} onPress={onClose}>
+                <Text style={styles.cancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.applyBtn} onPress={handleApply}>
+                <Text style={styles.applyText}>Apply</Text>
+              </TouchableOpacity>
             </View>
-          ) : null}
-
-          {error ? <Text style={styles.error}>{error}</Text> : null}
-
-          <View style={styles.actions}>
-            <TouchableOpacity style={styles.cancelBtn} onPress={onClose}>
-              <Text style={styles.cancelText}>Cancel</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.applyBtn} onPress={handleApply}>
-              <Text style={styles.applyText}>Apply</Text>
-            </TouchableOpacity>
           </View>
-        </View>
-      </KeyboardAvoidingView>
-    </Modal>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Must sit outside Modal — nested Android dialogs drop/alter the chosen date. */}
+      {androidPicker}
+    </>
   );
 }
 

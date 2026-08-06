@@ -61,7 +61,20 @@ export async function registerPushDevice(): Promise<boolean> {
     return true;
   } catch (error) {
     if (__DEV__) {
-      console.warn('[FCM] registerPushDevice failed', error);
+      const status = (error as { response?: { status?: number; data?: unknown } })
+        ?.response?.status;
+      const data = (error as { response?: { data?: unknown } })?.response?.data;
+      console.warn(
+        '[FCM] registerPushDevice failed',
+        status ? `HTTP ${status}` : '',
+        data || error,
+      );
+      if (status === 404) {
+        console.warn(
+          '[FCM] /auth/mobile/register-device not found on this API. ' +
+            'Point the app at local Node (10.0.2.2:8080) or deploy the route to testapi.',
+        );
+      }
     }
     return false;
   }

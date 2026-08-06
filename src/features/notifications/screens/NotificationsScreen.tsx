@@ -12,13 +12,18 @@ import {
 import { AlertDot } from '../../../components/icons';
 import { Colors, FontSize, Spacing, Radius } from '../../../theme';
 import { fmtDateTime } from '../../../utils/format';
-import type { FleetNotification } from '../../../services/notifications/notificationTypes';
 import {
+  getVisibleNotifications,
+  isConditionBasedDashboardRow,
   loadNotifications,
   markAllNotificationsRead,
   markNotificationRead,
 } from '../../../services/notifications/notificationCenter';
 import { notificationEvents } from '../../../services/notifications/notificationEvents';
+import { notificationApi } from '../../../services/api/notificationApi';
+import { refreshNotificationInboxForSession } from '../../../services/notifications/notificationInboxRefresh';
+import type { FleetNotification } from '../../../services/notifications/notificationTypes';
+import { useAppSelector } from '../../../store';
 import {
   dashboardHeader,
   dashboardBody,
@@ -71,6 +76,11 @@ function parseComplianceBody(body: string): ComplianceBodyRow[] {
 }
 
 function resolveNotificationAction(item: FleetNotification): NotificationAction | null {
+  if (item.category === 'broadcast' || item.data?.type === '1' || item.data?.page === '1') {
+    // Broadcast detail is already on the card — no deep-link action needed
+    return null;
+  }
+
   if (item.category === 'rc_expiry' || item.data?.screen === 'RCList') {
     return { label: 'View RC', kind: 'more', screen: 'RCList' };
   }
@@ -105,43 +115,76 @@ function resolveNotificationAction(item: FleetNotification): NotificationAction 
 
 export default function NotificationsScreen() {
   const navigation = useNavigation<NotificationsNav>();
-  const [items, setItems] = useState<FleetNotification[]>([]);
+  const auth = useAppSelector((s) => s.auth);
+  const [items, setItems] = useState<FleetNotification[]>(() => getVisibleNotifications());
   const [refreshing, setRefreshing] = useState(false);
 
-  const reload = useCallback(() => {
-    setItems(loadNotifications());
-  }, []);
+  const reload = useCallback(async () => {
+    await refreshNotificationInboxForSession({
+      user: auth.user,
+      dashboardContext: auth.dashboardContext,
+      accessToken: auth.accessToken,
+      fetchFreshDashboard: true,
+    });
+    setItems(getVisibleNotifications());
+  }, [auth.accessToken, auth.dashboardContext, auth.user]);
 
   useEffect(() => {
-    return notificationEvents.subscribe(reload);
-  }, [reload]);
+    return notificationEvents.subscribe(() => {
+      setItems(getVisibleNotifications());
+    });
+  }, []);
 
-  // Frozen tab stacks skip React updates — always reload from MMKV on focus.
+  // Frozen tab stacks skip React updates — always reload from API + cache on focus.
   useFocusEffect(
     useCallback(() => {
-      reload();
+      void reload();
     }, [reload]),
   );
 
   const markRead = useCallback((id: string) => {
-    setItems(markNotificationRead(id));
+    const target = loadNotifications().find((row) => row.id === id);
+    if (target && isConditionBasedDashboardRow(target)) {
+      return;
+    }
+
+    markNotificationRead(id);
+    setItems(getVisibleNotifications());
+
+    // Sync broadcast read state to server (same as web GET /notification/:id)
+    const numericId = Number(id);
+    if (Number.isFinite(numericId) && numericId > 0) {
+      void notificationApi.markRead(numericId).catch(() => {
+        /* local read already applied */
+      });
+    }
   }, []);
 
   const markAllRead = useCallback(() => {
-    setItems(markAllNotificationsRead());
+    markAllNotificationsRead();
+    setItems(getVisibleNotifications());
+    void notificationApi.markAllRead().catch(() => {
+      /* local read already applied */
+    });
   }, []);
 
-  const onRefresh = useCallback(() => {
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    reload();
-    setRefreshing(false);
+    try {
+      await reload();
+    } finally {
+      setRefreshing(false);
+    }
   }, [reload]);
 
   const handleOpenAction = useCallback((item: FleetNotification) => {
     const action = resolveNotificationAction(item);
     if (!action) return;
 
-    markNotificationRead(item.id);
+    if (!isConditionBasedDashboardRow(item)) {
+      markNotificationRead(item.id);
+      setItems(getVisibleNotifications());
+    }
 
     if (action.kind === 'tab') {
       navigation.navigate(action.tab, {
@@ -159,7 +202,7 @@ export default function NotificationsScreen() {
     navigation.navigate(action.screen);
   }, [navigation]);
 
-  const hasUnread = items.some((item) => !item.read);
+  const hasUnread = items.some((item) => !item.read || isConditionBasedDashboardRow(item));
 
   const renderItem = ({ item }: { item: FleetNotification }) => {
     const action = resolveNotificationAction(item);
@@ -168,7 +211,14 @@ export default function NotificationsScreen() {
     const complianceRows = item.category === 'rc_expiry' ? parseComplianceBody(displayText) : [];
 
     return (
-      <TouchableOpacity activeOpacity={0.85} onPress={() => markRead(item.id)}>
+      <TouchableOpacity
+        activeOpacity={0.85}
+        onPress={() => {
+          if (!isConditionBasedDashboardRow(item)) {
+            markRead(item.id);
+          }
+        }}
+      >
         <GlassCard variant={item.read ? 'default' : 'info'} style={styles.card}>
           <View style={styles.titleRow}>
             <Text style={[styles.title, !item.read && styles.titleUnread]}>

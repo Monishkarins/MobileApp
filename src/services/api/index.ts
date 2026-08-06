@@ -8,3 +8,4 @@ export { vehicleApi } from './vehicleApi';
 export { walletApi } from './walletApi';
 export { complianceApi } from './complianceApi';
 export { profileApi } from './profileApi';
+export { notificationApi } from './notificationApi';

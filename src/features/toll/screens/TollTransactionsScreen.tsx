@@ -113,6 +113,8 @@ function buildListParams(
   }
 
   if (dateFilter.mode === 'custom') {
+    // Web TollTxnReportHeader: only fromDate+toDate (YYYY-MM-DD HH:mm).
+    // Backend resolveTollHistorySources then reads live and/or archive tables.
     return {
       fromDate: dateFilter.fromDate,
       toDate: dateFilter.toDate,
@@ -205,8 +207,9 @@ export default function TollTransactionsScreen() {
 
   const customRangeLabel = useMemo(() => {
     if (dateFilter.mode !== 'custom') return null;
-    const from = dayjs(dateFilter.fromDate).format('DD MMM');
-    const to = dayjs(dateFilter.toDate).format('DD MMM');
+    // Slice YYYY-MM-DD so the chip stays correct even if time suffix is present.
+    const from = dayjs(dateFilter.fromDate.slice(0, 10)).format('DD MMM YYYY');
+    const to = dayjs(dateFilter.toDate.slice(0, 10)).format('DD MMM YYYY');
     return `${from} – ${to}`;
   }, [dateFilter]);
 
@@ -219,17 +222,20 @@ export default function TollTransactionsScreen() {
     try {
       // searchType is irrelevant for the period ledger API — type-ahead filters client-side.
       // Vehicle drill-downs always query by vehicleNo (the only scoped search key).
-      const { data } = await tollApi.getTransactions(
-        buildListParams(
-          dateFilter,
-          'vehicleNo',
-          search,
-          pg,
-          vehicleScoped,
-          txnType,
-          scopedCustomerId,
-        ) as any,
+      const listParams = buildListParams(
+        dateFilter,
+        'vehicleNo',
+        search,
+        pg,
+        vehicleScoped,
+        txnType,
+        scopedCustomerId,
       );
+      if (__DEV__) {
+        // Confirm custom from/to reach the wire — archive history depends on both.
+        console.log('[TollList] getTransactions', listParams);
+      }
+      const { data } = await tollApi.getTransactions(listParams as any);
 
       if (reqId !== reqIdRef.current) return;
 
@@ -261,8 +267,18 @@ export default function TollTransactionsScreen() {
       else setTxns((prev) => [...prev, ...mapped]);
       setTotal(data.count ?? mapped.length);
       setPage(pg);
-    } catch { /* empty state handles no data */ }
-    finally {
+    } catch (err: unknown) {
+      if (reqId !== reqIdRef.current) return;
+      // Do not leave a previous period's rows under a new Custom chip.
+      if (pg === 1) {
+        setTxns([]);
+        setTotal(0);
+        Alert.alert(
+          'Could not load transactions',
+          getApiErrorMessage(err, 'Request failed. Try a shorter date range.'),
+        );
+      }
+    } finally {
       if (reqId === reqIdRef.current) {
         setLoading(false);
         setRefreshing(false);

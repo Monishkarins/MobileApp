@@ -42,6 +42,7 @@ import { type DLListNavParams } from '../../compliance/utils/driverNavigationUti
 import { buildFySavingsFromSummary, hasIncentiveProgramFromSummary } from '../utils/fySavingsUtils';
 import {computeFleetIntelligence} from '../dashboardMetrics';
 import { syncDashboardNotifications } from '../../../services/notifications/syncDashboardNotifications';
+import { syncBroadcastNotificationsFromApi } from '../../../services/notifications/notificationCenter';
 import {
   DEFAULT_DASHBOARD_TOLL_PERIOD,
   mapTollPeriodToListRange,
@@ -93,6 +94,7 @@ export default function DashboardScreen() {
       setData(cached ?? null);
       if (cached) {
         syncDashboardNotifications(cached, { userId: user?.userId, customerId });
+        void syncBroadcastNotificationsFromApi();
       }
       setLoading(true);
     }
@@ -107,6 +109,7 @@ export default function DashboardScreen() {
       setData(normalized);
       Cache.setJSON(cacheKey, normalized);
       syncDashboardNotifications(normalized, { userId: user?.userId, customerId });
+      void syncBroadcastNotificationsFromApi();
       setLastUpdated(new Date().toISOString());
     } catch (err: any) {
       setError(err?.message ?? 'Failed to load dashboard');

@@ -84,7 +84,7 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         // Keep in sync with package.json; bump versionCode for every Play Store upload.
-        versionCode 30
+        versionCode 31
         versionName "2.1.1"
     }
     signingConfigs {
