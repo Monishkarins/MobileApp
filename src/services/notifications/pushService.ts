@@ -14,14 +14,17 @@ import { Platform } from 'react-native';
 import type { FirebaseMessagingTypes } from '@react-native-firebase/messaging';
 import notifee, {
   AndroidImportance,
+  AndroidStyle,
   EventType,
   AuthorizationStatus,
 } from '@notifee/react-native';
 import { check, request, PERMISSIONS, RESULTS } from 'react-native-permissions';
 import {
   mapRemoteMessageToNotification,
+  resolveNotificationImageUrl,
   upsertNotification,
 } from './notificationCenter';
+import { navigateToNotificationsScreen } from './notificationNavigation';
 import type { FleetNotification } from './notificationTypes';
 import {
   getMessagingInstance,
@@ -62,16 +65,30 @@ function formatTrayBody(notification: Pick<FleetNotification, 'body' | 'detail'>
 }
 
 /** Shared Android tray chrome so local + FCM alerts look the same across OEMs. */
-function buildAndroidDisplayOptions(options?: { onlyAlertOnce?: boolean }) {
+function buildAndroidDisplayOptions(
+  options?: { onlyAlertOnce?: boolean; imageUrl?: string | null },
+) {
+  const imageUrl = options?.imageUrl?.trim() || null;
+
   return {
     channelId: ANDROID_CHANNEL_ID,
     pressAction: { id: 'default' as const },
     smallIcon: ANDROID_NOTIFICATION_SMALL_ICON,
-    largeIcon: ANDROID_NOTIFICATION_LARGE_ICON,
+    // Prefer the alert image as large icon when present; else app launcher mark.
+    largeIcon: imageUrl || ANDROID_NOTIFICATION_LARGE_ICON,
     color: ANDROID_NOTIFICATION_COLOR,
     importance: AndroidImportance.HIGH,
     sound: 'default',
     onlyAlertOnce: options?.onlyAlertOnce ?? false,
+    // BigPicture expands the tray row so received image broadcasts are visible.
+    ...(imageUrl
+      ? {
+          style: {
+            type: AndroidStyle.BIGPICTURE as const,
+            picture: imageUrl,
+          },
+        }
+      : {}),
   };
 }
 
@@ -83,11 +100,16 @@ export async function syncInboxFromSystemTray(): Promise<void> {
       if (!notification?.id) return;
 
       const data = notification.data ?? {};
+      const image =
+        resolveNotificationImageUrl(
+          String(data.image ?? data.imageUrl ?? data.picture ?? ''),
+        ) ?? undefined;
       upsertNotification({
         id: String(notification.id),
         category: String(data.category ?? data.type ?? 'product_update'),
         title: notification.title ?? 'Karins Fleet',
         body: notification.body ?? '',
+        image,
         createdAt: String(data.createdAt ?? new Date().toISOString()),
         read: false,
         data: Object.fromEntries(
@@ -189,6 +211,9 @@ export const pushService = {
 
       // Full detail in body (one line) — no short/collapse summary and no BigText chevron.
       const trayBody = formatTrayBody(notification);
+      const imageUrl = resolveNotificationImageUrl(
+        notification.image ?? notification.data?.image,
+      );
       await notifee.displayNotification({
         id: notification.id,
         title: notification.title,
@@ -197,14 +222,23 @@ export const pushService = {
           category: notification.category,
           createdAt: notification.createdAt,
           ...(notification.data ?? {}),
+          ...(imageUrl ? { image: imageUrl } : {}),
         },
-        android: buildAndroidDisplayOptions(options),
+        android: buildAndroidDisplayOptions({
+          onlyAlertOnce: options?.onlyAlertOnce,
+          imageUrl,
+        }),
         ios: {
           foregroundPresentationOptions: {
             alert: true,
             badge: true,
             sound: true,
           },
+          ...(imageUrl
+            ? {
+                attachments: [{ url: imageUrl }],
+              }
+            : {}),
         },
       });
       return true;
@@ -222,11 +256,16 @@ export const pushService = {
       notifee.onForegroundEvent(({ type, detail }) => {
         if (type === EventType.DELIVERED && detail.notification) {
           const data = detail.notification.data ?? {};
+          const image =
+            resolveNotificationImageUrl(
+              String(data.image ?? data.imageUrl ?? data.picture ?? ''),
+            ) ?? undefined;
           upsertNotification({
             id: String(detail.notification.id ?? Date.now()),
             category: String(data.category ?? data.type ?? 'product_update'),
             title: detail.notification.title ?? 'Karins Fleet',
             body: detail.notification.body ?? '',
+            image,
             createdAt: String(data.createdAt ?? new Date().toISOString()),
             read: false,
             data: Object.fromEntries(
@@ -238,17 +277,24 @@ export const pushService = {
 
         if (type === EventType.PRESS && detail.notification) {
           const data = detail.notification.data ?? {};
+          const image =
+            resolveNotificationImageUrl(
+              String(data.image ?? data.imageUrl ?? data.picture ?? ''),
+            ) ?? undefined;
           upsertNotification({
             id: String(detail.notification.id ?? Date.now()),
             category: String(data.category ?? data.type ?? 'product_update'),
             title: detail.notification.title ?? 'Karins Fleet',
             body: detail.notification.body ?? '',
+            image,
             createdAt: String(data.createdAt ?? new Date().toISOString()),
             read: false,
             data: Object.fromEntries(
               Object.entries(data).map(([k, v]) => [k, String(v)]),
             ),
           });
+          // Tray tap → Notifications menu (bell inbox).
+          navigateToNotificationsScreen();
         }
       });
     } catch {
@@ -311,6 +357,7 @@ export const pushService = {
       await pushService.ensureAndroidChannel();
 
       const trayBody = formatTrayBody(mapped);
+      const imageUrl = resolveNotificationImageUrl(mapped.image ?? mapped.data?.image);
       await notifee.displayNotification({
         id: mapped.id,
         title: mapped.title,
@@ -319,8 +366,16 @@ export const pushService = {
           ...mapped.data,
           category: mapped.category,
           createdAt: mapped.createdAt,
+          ...(imageUrl ? { image: imageUrl } : {}),
         },
-        android: buildAndroidDisplayOptions(),
+        android: buildAndroidDisplayOptions({ imageUrl }),
+        ios: {
+          ...(imageUrl
+            ? {
+                attachments: [{ url: imageUrl }],
+              }
+            : {}),
+        },
       });
     } catch {
       /* display is best-effort */
@@ -329,7 +384,12 @@ export const pushService = {
 
   /** Persist incoming push and optionally show a banner when the app is open. */
   async handleIncomingMessage(message: FirebaseMessagingTypes.RemoteMessage): Promise<void> {
-    upsertNotification(mapRemoteMessageToNotification(message));
+    const mapped = mapRemoteMessageToNotification(message);
+    upsertNotification(mapped);
+    // Admin broadcasts also open an in-app popup while the session is active.
+    void import('./localFleetNotificationService')
+      .then(({ maybeShowBroadcastPopup }) => maybeShowBroadcastPopup(mapped))
+      .catch(() => undefined);
     await pushService.displayNotification(message);
   },
 
@@ -362,13 +422,19 @@ export const pushService = {
 
     try {
       messaging.onNotificationOpenedApp((message) => {
-        if (message) upsertNotification(mapRemoteMessageToNotification(message));
+        if (message) {
+          upsertNotification(mapRemoteMessageToNotification(message));
+          navigateToNotificationsScreen();
+        }
       });
 
       messaging
         .getInitialNotification()
         .then((message) => {
-          if (message) upsertNotification(mapRemoteMessageToNotification(message));
+          if (message) {
+            upsertNotification(mapRemoteMessageToNotification(message));
+            navigateToNotificationsScreen();
+          }
         })
         .catch(() => {});
     } catch {

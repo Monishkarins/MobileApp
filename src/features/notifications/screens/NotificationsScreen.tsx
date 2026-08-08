@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  View, Text, FlatList, StyleSheet, TouchableOpacity, RefreshControl,
+  View, Text, ScrollView, StyleSheet, Pressable, RefreshControl, Image,
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { CompositeNavigationProp } from '@react-navigation/native';
@@ -18,6 +18,7 @@ import {
   loadNotifications,
   markAllNotificationsRead,
   markNotificationRead,
+  resolveNotificationImageUrl,
 } from '../../../services/notifications/notificationCenter';
 import { notificationEvents } from '../../../services/notifications/notificationEvents';
 import { notificationApi } from '../../../services/api/notificationApi';
@@ -53,6 +54,21 @@ interface ComplianceBodyRow {
   label: string;
   expired: string;
   expiring: string;
+}
+
+/**
+ * Same as web NotificationDrawer: resolve path → absolute URL, then render with Image.
+ * No fetch/data-URI pipeline — browser-style direct URI load.
+ */
+function NotificationImage({ uri }: { uri: string }) {
+  return (
+    <Image
+      source={{ uri }}
+      style={styles.image}
+      resizeMode="contain"
+      accessibilityLabel="Notification image"
+    />
+  );
 }
 
 /**
@@ -147,11 +163,17 @@ export default function NotificationsScreen() {
     if (target && isConditionBasedDashboardRow(target)) {
       return;
     }
+    // Already opened — keep card as-is (no style flash / no re-prune).
+    if (target?.read) {
+      return;
+    }
 
     markNotificationRead(id);
-    setItems(getVisibleNotifications());
+    // Update in place so the row never drops out of the list on click.
+    setItems((prev) =>
+      prev.map((row) => (row.id === id ? { ...row, read: true } : row)),
+    );
 
-    // Sync broadcast read state to server (same as web GET /notification/:id)
     const numericId = Number(id);
     if (Number.isFinite(numericId) && numericId > 0) {
       void notificationApi.markRead(numericId).catch(() => {
@@ -162,7 +184,11 @@ export default function NotificationsScreen() {
 
   const markAllRead = useCallback(() => {
     markAllNotificationsRead();
-    setItems(getVisibleNotifications());
+    setItems((prev) =>
+      prev.map((row) =>
+        (isConditionBasedDashboardRow(row) ? row : { ...row, read: true }),
+      ),
+    );
     void notificationApi.markAllRead().catch(() => {
       /* local read already applied */
     });
@@ -183,7 +209,9 @@ export default function NotificationsScreen() {
 
     if (!isConditionBasedDashboardRow(item)) {
       markNotificationRead(item.id);
-      setItems(getVisibleNotifications());
+      setItems((prev) =>
+        prev.map((row) => (row.id === item.id ? { ...row, read: true } : row)),
+      );
     }
 
     if (action.kind === 'tab') {
@@ -204,27 +232,35 @@ export default function NotificationsScreen() {
 
   const hasUnread = items.some((item) => !item.read || isConditionBasedDashboardRow(item));
 
-  const renderItem = ({ item }: { item: FleetNotification }) => {
+  const renderCard = (item: FleetNotification) => {
     const action = resolveNotificationAction(item);
     // Prefer multi-line detail for inbox cards; body alone is the collapsed tray summary.
     const displayText = item.detail?.trim() || item.body;
     const complianceRows = item.category === 'rc_expiry' ? parseComplianceBody(displayText) : [];
 
+    // Unread = darker card; opened = lighter card. No press opacity fade.
+    const isUnread = !item.read || isConditionBasedDashboardRow(item);
+    // Web NotificationDrawer.resolveImageUrl — single absolute URL, no fallback chain.
+    const imageUrl = resolveNotificationImageUrl(item.image ?? item.data?.image);
+
     return (
-      <TouchableOpacity
-        activeOpacity={0.85}
+      <Pressable
+        key={item.id}
         onPress={() => {
           if (!isConditionBasedDashboardRow(item)) {
             markRead(item.id);
           }
         }}
       >
-        <GlassCard variant={item.read ? 'default' : 'info'} style={styles.card}>
+        <GlassCard
+          variant="default"
+          style={[styles.card, isUnread ? styles.cardUnread : styles.cardRead]}
+        >
           <View style={styles.titleRow}>
-            <Text style={[styles.title, !item.read && styles.titleUnread]}>
+            <Text style={[styles.title, isUnread && styles.titleUnread]}>
               {item.title}
             </Text>
-            {!item.read ? (
+            {isUnread ? (
               <View style={styles.dotWrap}>
                 <AlertDot size={9} color={Colors.info} />
               </View>
@@ -244,24 +280,23 @@ export default function NotificationsScreen() {
               ))}
             </View>
           ) : (
-            // Prefer detail when present; wrap naturally for readable alert copy.
             <Text style={styles.body}>{displayText}</Text>
           )}
+          {imageUrl ? <NotificationImage uri={imageUrl} /> : null}
           <View style={styles.footerRow}>
             <Text style={styles.time}>{fmtDateTime(item.createdAt)}</Text>
             {action ? (
-              <TouchableOpacity
+              <Pressable
                 style={styles.actionBtn}
                 onPress={() => handleOpenAction(item)}
-                activeOpacity={0.85}
                 hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
               >
                 <Text style={styles.actionBtnText}>{action.label}</Text>
-              </TouchableOpacity>
+              </Pressable>
             ) : null}
           </View>
         </GlassCard>
-      </TouchableOpacity>
+      </Pressable>
     );
   };
 
@@ -271,7 +306,7 @@ export default function NotificationsScreen() {
         title="Notifications"
         showBack
         rightElement={(
-          <TouchableOpacity
+          <Pressable
             onPress={markAllRead}
             disabled={!hasUnread}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -279,26 +314,26 @@ export default function NotificationsScreen() {
             <Text style={[styles.markAll, !hasUnread && styles.markAllDisabled]}>
               Mark all as read
             </Text>
-          </TouchableOpacity>
+          </Pressable>
         )}
       />
-      <FlatList
-        data={items}
-        keyExtractor={(item) => item.id}
-        renderItem={renderItem}
+      <ScrollView
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
         refreshControl={(
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={Colors.blue} />
         )}
-        ListEmptyComponent={(
+      >
+        {items.length === 0 ? (
           <EmptyState
             title="No notifications yet"
             subtitle="Alerts for wallet, tolls, claims, and compliance will show up here."
             icon=""
           />
+        ) : (
+          items.map((item) => renderCard(item))
         )}
-      />
+      </ScrollView>
     </LiquidBackground>
   );
 }
@@ -312,6 +347,16 @@ const styles = StyleSheet.create({
   },
   card: {
     padding: Spacing[4],
+  },
+  // New / unread — darker solid card (must stay fully visible, never fade).
+  cardUnread: {
+    backgroundColor: 'rgba(4, 22, 40, 0.96)',
+    borderColor: 'rgba(66, 165, 255, 0.42)',
+  },
+  // Opened / read — lighter but still solid so the row does not look like it vanished.
+  cardRead: {
+    backgroundColor: 'rgba(72, 102, 132, 0.78)',
+    borderColor: 'rgba(255, 255, 255, 0.26)',
   },
   titleRow: {
     flexDirection: 'row',
@@ -340,6 +385,17 @@ const styles = StyleSheet.create({
     ...dashboardBody,
     lineHeight: 18,
     marginBottom: Spacing[2],
+  },
+  // Match web NotificationDetailPopup image: full width, contain, light frame.
+  image: {
+    width: '100%',
+    maxHeight: 220,
+    height: 220,
+    borderRadius: 10,
+    marginBottom: Spacing[2],
+    borderWidth: 1,
+    borderColor: 'rgba(229, 233, 242, 0.35)',
+    backgroundColor: 'rgba(248, 250, 252, 0.12)',
   },
   complianceBody: {
     gap: 6,

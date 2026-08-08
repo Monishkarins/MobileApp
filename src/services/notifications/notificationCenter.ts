@@ -3,16 +3,21 @@
  *
  * Two sources (same idea as karins_fastag_react fleet bell):
  * 1. Dashboard-derived alerts (wallet, challan, RC, …) — local, today-scoped
- * 2. Admin type=1 broadcasts — fetched from GET /notification (no Firebase)
+ * 2. Admin type=1 broadcasts — fetched from GET /notification; new unread rows
+ *    also surface as system tray pushes via Notifee (FCM optional if backend sends)
  */
 
 import type { FirebaseMessagingTypes } from '@react-native-firebase/messaging';
+import { API_BASE_URL } from '../../config/env';
 import { Cache } from '../storage/SecureStorage';
 import { notificationApi, type NotificationListRow } from '../api/notificationApi';
 import type { FleetNotification } from './notificationTypes';
 import { notificationEvents } from './notificationEvents';
 
 export const NOTIFICATIONS_CACHE_KEY = 'notifications_center';
+const NOTIFICATIONS_IMAGE_FIX_KEY = 'notifications_center_image_fix';
+/** Bump when image URL rules change so stale rewritten paths are dropped. */
+const NOTIFICATIONS_IMAGE_FIX_VERSION = 6;
 const MAX_STORED_NOTIFICATIONS = 200;
 
 /** Prefix for alerts derived from the dashboard summary. */
@@ -20,6 +25,19 @@ export const DASHBOARD_NOTIFICATION_ID_PREFIX = 'dash-';
 
 /** Broadcast rows synced from Node GET /notification. */
 export const BROADCAST_CATEGORY = 'broadcast';
+
+/**
+ * Absolute URL for notification artwork — same rules as web NotificationDrawer.resolveImageUrl:
+ * full http(s) URLs pass through; relative paths are prefixed with API origin (strip /api).
+ */
+export function resolveNotificationImageUrl(image?: string | null): string | null {
+  const raw = String(image ?? '').trim();
+  if (!raw || raw === 'null' || raw === 'undefined') return null;
+  if (raw.startsWith('http') || raw.startsWith('data:')) return raw;
+
+  const apiOrigin = API_BASE_URL.replace(/\/api\/?$/i, '');
+  return `${apiOrigin}${raw.startsWith('/') ? raw : `/${raw}`}`;
+}
 
 /** Operational alerts — stay visible while the underlying issue exists (web bell parity). */
 export const CONDITION_BASED_DASHBOARD_IDS = new Set([
@@ -32,10 +50,6 @@ export const CONDITION_BASED_DASHBOARD_IDS = new Set([
 
 export function isConditionBasedDashboardRow(row: FleetNotification): boolean {
   return CONDITION_BASED_DASHBOARD_IDS.has(row.id);
-}
-
-function isAnnouncementDashboardRow(row: FleetNotification): boolean {
-  return row.id.startsWith(`${DASHBOARD_NOTIFICATION_ID_PREFIX}announcement-`);
 }
 
 function startOfLocalDay(date = new Date()): Date {
@@ -63,27 +77,62 @@ function isDashboardRow(row: FleetNotification): boolean {
 }
 
 /**
- * Keep dashboard alerts for today only; keep unread API broadcasts until read
- * (matches web bell — not limited to “today”).
+ * Keep dashboard alerts for today only.
+ * Broadcasts always stay in the local inbox (read + unread) — pruning read
+ * rows on click made cards vanish when createdAt parsing/timezone failed.
  */
 function pruneInbox(items: FleetNotification[]): FleetNotification[] {
   return items.filter((row) => {
-    if (isDashboardRow(row)) return isCreatedToday(row.createdAt);
     if (isBroadcastRow(row)) return true;
-    // Legacy FCM / other local rows — keep today’s only
+    if (isDashboardRow(row)) return isCreatedToday(row.createdAt);
     return isCreatedToday(row.createdAt);
+  });
+}
+
+function isBrokenMediaRouteUrl(value?: string | null): boolean {
+  const raw = String(value ?? '');
+  return /\/notification\/\d+\/image\/?$/i.test(raw)
+    || /\/api\/notification\/\d+\/image\/?$/i.test(raw);
+}
+
+/**
+ * Drop rewritten media-route URLs from an older app build so the next API sync
+ * can restore real `/uploads/notification/...` paths (SIVA-style).
+ */
+function sanitizeNotificationImageFields(
+  items: FleetNotification[],
+): FleetNotification[] {
+  return items.map((row) => {
+    const next = { ...row, data: row.data ? { ...row.data } : undefined };
+    if (isBrokenMediaRouteUrl(next.image)) {
+      next.image = undefined;
+    }
+    if (next.data?.image && isBrokenMediaRouteUrl(next.data.image)) {
+      delete next.data.image;
+    }
+    // Prefer a usable relative uploads path still sitting in data.
+    if (!next.image && next.data?.image && !isBrokenMediaRouteUrl(next.data.image)) {
+      next.image = resolveNotificationImageUrl(next.data.image) ?? next.data.image;
+    }
+    return next;
   });
 }
 
 export function loadNotifications(): FleetNotification[] {
   const stored = Cache.getJSON<FleetNotification[]>(NOTIFICATIONS_CACHE_KEY) ?? [];
-  const pruned = pruneInbox(stored);
+  const fixVersion = Cache.getString(NOTIFICATIONS_IMAGE_FIX_KEY);
+  let items = pruneInbox(stored);
 
-  if (pruned.length !== stored.length) {
-    Cache.setJSON(NOTIFICATIONS_CACHE_KEY, pruned.slice(0, MAX_STORED_NOTIFICATIONS));
+  // One-time scrub of bad image URLs left by earlier resolve rewrites.
+  if (fixVersion !== String(NOTIFICATIONS_IMAGE_FIX_VERSION)) {
+    items = sanitizeNotificationImageFields(items);
+    Cache.setJSON(NOTIFICATIONS_CACHE_KEY, items.slice(0, MAX_STORED_NOTIFICATIONS));
+    Cache.set(NOTIFICATIONS_IMAGE_FIX_KEY, String(NOTIFICATIONS_IMAGE_FIX_VERSION));
+  } else if (items.length !== stored.length) {
+    Cache.setJSON(NOTIFICATIONS_CACHE_KEY, items.slice(0, MAX_STORED_NOTIFICATIONS));
   }
 
-  return pruned;
+  return items;
 }
 
 export function saveNotifications(items: FleetNotification[]): void {
@@ -91,18 +140,20 @@ export function saveNotifications(items: FleetNotification[]): void {
   Cache.setJSON(NOTIFICATIONS_CACHE_KEY, pruned.slice(0, MAX_STORED_NOTIFICATIONS));
 }
 
+/** Badge count — unread only (condition-based ops alerts always count while present). */
 export function getUnreadNotificationCount(): number {
-  return getVisibleNotifications().length;
-}
-
-/** Rows shown in the bell badge and notifications list — mirrors web drawer rules. */
-export function getVisibleNotifications(): FleetNotification[] {
   return loadNotifications().filter((row) => {
     if (isConditionBasedDashboardRow(row)) return true;
-    if (isBroadcastRow(row)) return true;
-    if (isAnnouncementDashboardRow(row)) return !row.read;
     return !row.read;
-  });
+  }).length;
+}
+
+/**
+ * Full inbox list: keep opened rows visible (light) instead of removing them.
+ * Badge unread count is separate via getUnreadNotificationCount.
+ */
+export function getVisibleNotifications(): FleetNotification[] {
+  return loadNotifications();
 }
 
 export function upsertNotification(item: FleetNotification): FleetNotification[] {
@@ -119,6 +170,11 @@ export function upsertNotification(item: FleetNotification): FleetNotification[]
             ? {
                 ...row,
                 ...item,
+                // Keep prior artwork if a later upsert omits image (e.g. tray sync),
+                // but never keep a broken rewritten media-route URL.
+                image:
+                  item.image
+                  ?? (isBrokenMediaRouteUrl(row.image) ? undefined : row.image),
                 read: row.read,
               }
             : row,
@@ -163,39 +219,83 @@ function mapApiRowToFleetNotification(row: NotificationListRow): FleetNotificati
     ? new Date(row.createdAt).toISOString()
     : new Date().toISOString();
 
+  // Store the raw API path (or absolute URL). Resolve to host URL only at display
+  // time so we never persist a rewritten/broken media route in cache.
+  const rawImage = String(row.image ?? row.image_path ?? '').trim() || null;
+  const image = rawImage && !isBrokenMediaRouteUrl(rawImage) ? rawImage : undefined;
+
   return {
     id: String(row.id),
     category: BROADCAST_CATEGORY,
     title: row.text || 'Notification',
     body: shortBody,
     detail: fullText || shortBody || undefined,
+    image,
     createdAt,
     read: Boolean(row.isRead),
     data: {
       type: String(row.type ?? 1),
       page: '1',
       notificationId: String(row.id),
+      ...(image ? { image } : {}),
     },
   };
 }
 
 /**
- * Pull unread type=1 broadcasts from Node (same as web fleet bell).
- * Replaces previous broadcast rows; keeps dashboard-derived alerts.
+ * Pull type=1 broadcasts from Node (same as web fleet bell).
+ * Always replaces local broadcast rows so image paths stay in sync with API.
+ * Newly arrived unread admin rows are also shown as OS push banners.
  */
 export async function syncBroadcastNotificationsFromApi(): Promise<FleetNotification[]> {
   try {
-    const rows = await notificationApi.listUnread(50);
-    const broadcasts = rows
-      .filter((row) => !row.isRead)
-      .map(mapApiRowToFleetNotification);
+    const rows = await notificationApi.list(50);
+    const broadcasts = rows.map(mapApiRowToFleetNotification);
+
+    if (__DEV__) {
+      broadcasts.forEach((row) => {
+        console.log(
+          '[Notifications] broadcast image',
+          row.id,
+          row.title,
+          row.image ?? '(none)',
+        );
+      });
+    }
 
     const existing = loadNotifications();
     const dashboardAndOther = existing.filter((row) => !isBroadcastRow(row));
 
-    const next = [...broadcasts, ...dashboardAndOther];
+    // Preserve local read state when API omits isRead, but never keep stale images.
+    const mergedBroadcasts = broadcasts.map((item) => {
+      const prior = existing.find((row) => row.id === item.id);
+      if (!prior) return item;
+      return {
+        ...item,
+        // API image wins; only keep prior artwork when API row has none.
+        image: item.image ?? prior.image,
+        data: {
+          ...(prior.data ?? {}),
+          ...(item.data ?? {}),
+          ...(item.image
+            ? { image: item.image }
+            : prior.data?.image && !isBrokenMediaRouteUrl(prior.data.image)
+              ? { image: prior.data.image }
+              : {}),
+        },
+        read: item.read || prior.read,
+      };
+    });
+
+    const next = [...mergedBroadcasts, ...dashboardAndOther];
     saveNotifications(next);
     notificationEvents.emit();
+
+    // Dynamic import avoids a circular dep with pushService → notificationCenter.
+    void import('./localFleetNotificationService')
+      .then(({ showNewBroadcastPushes }) => showNewBroadcastPushes(mergedBroadcasts))
+      .catch(() => undefined);
+
     return loadNotifications();
   } catch (error) {
     if (__DEV__) {
@@ -206,16 +306,9 @@ export async function syncBroadcastNotificationsFromApi(): Promise<FleetNotifica
 }
 
 export function markNotificationRead(id: string): FleetNotification[] {
-  // Drop broadcast rows once read (same as web: unreadOnly feed)
+  // Mark opened — do not remove; UI switches unread (dark) → read (light).
   const existing = loadNotifications();
-  const target = existing.find((row) => row.id === id);
-  let next: FleetNotification[];
-
-  if (target && isBroadcastRow(target)) {
-    next = existing.filter((row) => row.id !== id);
-  } else {
-    next = existing.map((row) => (row.id === id ? { ...row, read: true } : row));
-  }
+  const next = existing.map((row) => (row.id === id ? { ...row, read: true } : row));
 
   saveNotifications(next);
   notificationEvents.emit();
@@ -224,22 +317,20 @@ export function markNotificationRead(id: string): FleetNotification[] {
 
 export function markAllNotificationsRead(): FleetNotification[] {
   const existing = loadNotifications();
-  // Web: mark-all clears broadcasts + dismisses announcements only — not operational alerts
-  const next = existing
-    .filter((row) => !isBroadcastRow(row))
-    .map((row) => {
-      if (isConditionBasedDashboardRow(row)) {
-        return { ...row, read: false };
-      }
-      return { ...row, read: true };
-    });
+  // Mark-all opens every row except condition-based ops alerts (issue still open).
+  const next = existing.map((row) => {
+    if (isConditionBasedDashboardRow(row)) {
+      return { ...row, read: false };
+    }
+    return { ...row, read: true };
+  });
 
   saveNotifications(next);
   notificationEvents.emit();
   return loadNotifications();
 }
 
-/** Kept for optional FCM; primary broadcast path is API sync. */
+/** Maps FCM payloads into inbox rows (admin broadcast or category alert). */
 export function mapRemoteMessageToNotification(
   message: FirebaseMessagingTypes.RemoteMessage,
 ): FleetNotification {
@@ -261,6 +352,12 @@ export function mapRemoteMessageToNotification(
     data.body ?? (fullText.length > 90 ? `${fullText.substring(0, 90)}…` : fullText) ?? '',
   );
 
+  // FCM payloads may send image under several keys used by admin / web push.
+  const rawImage = String(
+    data.image ?? data.imageUrl ?? data.picture ?? data.photo ?? '',
+  ).trim();
+  const image = rawImage ? resolveNotificationImageUrl(rawImage) ?? undefined : undefined;
+
   return {
     id,
     category: isBroadcast
@@ -269,6 +366,7 @@ export function mapRemoteMessageToNotification(
     title,
     body: shortBody || title,
     detail: fullText || shortBody || undefined,
+    image,
     createdAt: String(data.createdAt ?? new Date().toISOString()),
     read: false,
     data: Object.fromEntries(

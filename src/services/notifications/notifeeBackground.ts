@@ -1,10 +1,11 @@
 /**
  * Notifee background events — persists tray alerts when the user taps them
- * while the app is backgrounded.
+ * while the app is backgrounded, then opens the Notifications menu.
  */
 
 import notifee, { EventType } from '@notifee/react-native';
 import { upsertNotification } from './notificationCenter';
+import { navigateToNotificationsScreen } from './notificationNavigation';
 
 notifee.onBackgroundEvent(async ({ type, detail }) => {
   if (type !== EventType.PRESS || !detail.notification) return;
@@ -21,4 +22,7 @@ notifee.onBackgroundEvent(async ({ type, detail }) => {
       Object.entries(data).map(([key, value]) => [key, String(value)]),
     ),
   });
+
+  // May queue until NavigationContainer is ready (cold start from tray).
+  navigateToNotificationsScreen();
 });

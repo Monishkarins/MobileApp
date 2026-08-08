@@ -18,6 +18,11 @@ import { AuthStack } from './AuthStack';
 import { linking } from './linking';
 import { PostLoginSplashScreen } from '../features/splash/PostLoginSplashScreen';
 import { usePushNotifications } from '../features/notifications/hooks/usePushNotifications';
+import BroadcastNotificationPopupHost from '../features/notifications/components/BroadcastNotificationPopupHost';
+import {
+  flushPendingNotificationNavigation,
+  navigationRef,
+} from '../services/notifications/notificationNavigation';
 import MainTabs from './MainTabs';
 
 export function RootNavigator() {
@@ -50,6 +55,12 @@ export function RootNavigator() {
     dispatch(fetchAccessMenus({ userId: user.userId, roleId: user.roleId }));
   }, [dispatch, sessionReady, user?.userId, user?.roleId]);
 
+  useEffect(() => {
+    if (!sessionReady) return;
+    // Tray tap during splash/bootstrap — open Notifications once the main shell is up.
+    flushPendingNotificationNavigation();
+  }, [sessionReady]);
+
   if (isBootstrapping) {
     return <LoadingScreen />;
   }
@@ -66,8 +77,18 @@ export function RootNavigator() {
   const navKey = isAuthenticated ? 'app-main' : 'auth';
 
   return (
-    <NavigationContainer key={navKey} linking={sessionReady ? linking : undefined}>
+    <NavigationContainer
+      key={navKey}
+      ref={navigationRef}
+      linking={sessionReady ? linking : undefined}
+      onReady={() => {
+        // Cold-start tray tap may have queued before the navigator mounted.
+        if (sessionReady) flushPendingNotificationNavigation();
+      }}
+    >
       {!isAuthenticated ? <AuthStack /> : <MainTabs />}
+      {/* Admin broadcast popup sits above tabs so it appears on any screen. */}
+      {sessionReady ? <BroadcastNotificationPopupHost /> : null}
     </NavigationContainer>
   );
 }
